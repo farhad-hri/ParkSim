@@ -1,3 +1,4 @@
+from time import time
 from typing import Dict, List
 
 from dlp.dataset import Dataset
@@ -12,6 +13,7 @@ import csv
 import dataclasses
 
 import numpy as np
+import pandas as pd
 import torch
 from scipy.io import savemat
 from parksim.pytypes import VehicleState
@@ -930,7 +932,7 @@ class RuleBasedSimulator(object):
                         velocities.append([s.t - st, s.v.v])
                     savemat(
                         str(Path.home())
-                        + "/ParkSim/vehicle_log/DJI_0030/simulated_vehicle_"
+                        + "/ParkSim/vehicle_log/DJI_0023/simulated_vehicle_"
                         + str(vehicle.vehicle_id)
                         + ".mat",
                         {"velocity": velocities},
@@ -1044,6 +1046,9 @@ class RuleBasedSimulator(object):
 
                 self.vis.render()
 
+        fps_list_df = pd.DataFrame(self.vis.fps_list)
+        fps_list_df.to_csv("fps_list.csv")
+
 
 """
 Change these parameters to run tests using the neural network
@@ -1055,7 +1060,7 @@ class RuleBasedSimulatorParams:
         self.seed = 0
 
         self.num_simulations = (
-            10  # number of simulations run (e.g. times started from scratch)
+            1  # number of simulations run (e.g. times started from scratch)
         )
         self.current_sim_num = 0
 
@@ -1063,24 +1068,24 @@ class RuleBasedSimulatorParams:
         self.intent_simulation = False
 
         self.use_existing_agents = True  # replay video data
-        self.agents_data_path = "/ParkSim/data/agents_data_0030.pickle"
+        self.agents_data_path = "/ParkSim/data/agents_data_0023.pickle"
 
         # should we replace where the agents park?
         self.use_existing_entrances = (
-            True  # have vehicles park in spots that they parked in real life
+            False  # have vehicles park in spots that they parked in real life
         )
 
         # don't use existing agents
-        self.spawn_entering_fn = lambda: 3
-        self.spawn_exiting_fn = lambda: 0
-        self.spawn_interval_mean_fn = lambda: 8  # (s)
+        self.spawn_entering_fn = lambda: 10
+        self.spawn_exiting_fn = lambda: 5
+        self.spawn_interval_mean_fn = lambda: 3  # (s)
 
         self.use_existing_obstacles = True  # able to park in "occupied" spots from dataset? False if yes, True if no
 
         self.load_existing_net = False  # generate a new net form scratch (and overwrite model.pickle) or use the one stored at self.spot_model_path
         self.use_nn = False  # pick spots using NN or not (irrelevant if self.use_existing_entrances is True)
         self.train_nn = False  # train NN or not
-        self.should_visualize = False  # display simulator or no
+        self.should_visualize = True  # display simulator or no
 
         # before changing model, don't forget to set: spot selection, loss function
         self.spot_model_path = (
@@ -1138,7 +1143,9 @@ class RuleBasedSimulatorParams:
                     + str(self.spawn_interval_mean)
                     + " spawn interval mean"
                 )
+            tic = time()
             simulator.run()
+            print(f"Used {time() - tic} s to run the simulation")
             if self.use_existing_agents:
                 print(
                     "Experiment "
@@ -1293,7 +1300,7 @@ def main():
 
     home_path = str(Path.home())
     print("Loading dataset...")
-    ds.load(home_path + "/dlp-dataset/data/DJI_0030")
+    ds.load(home_path + "/dlp-dataset/data/DJI_0023")
     print("Dataset loaded.")
 
     params = RuleBasedSimulatorParams()
