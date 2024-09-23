@@ -932,7 +932,7 @@ class RuleBasedSimulator(object):
                         velocities.append([s.t - st, s.v.v])
                     savemat(
                         str(Path.home())
-                        + "/ParkSim/vehicle_log/DJI_0023/simulated_vehicle_"
+                        + "/ParkSim/vehicle_log/DJI_0012/simulated_vehicle_"
                         + str(vehicle.vehicle_id)
                         + ".mat",
                         {"velocity": velocities},
@@ -1068,7 +1068,7 @@ class RuleBasedSimulatorParams:
         self.intent_simulation = False
 
         self.use_existing_agents = True  # replay video data
-        self.agents_data_path = "/ParkSim/data/agents_data_0023.pickle"
+        self.agents_data_path = "/ParkSim/data/agents_data_0012.pickle"
 
         # should we replace where the agents park?
         self.use_existing_entrances = (
@@ -1300,7 +1300,7 @@ def main():
 
     home_path = str(Path.home())
     print("Loading dataset...")
-    ds.load(home_path + "/dlp-dataset/data/DJI_0023")
+    ds.load(home_path + "/dlp-dataset/data/DJI_0012")
     print("Dataset loaded.")
 
     params = RuleBasedSimulatorParams()
