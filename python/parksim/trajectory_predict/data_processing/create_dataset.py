@@ -88,10 +88,11 @@ def create_dataset(path, name, tail_size):
     intent_pose = []
     cpu_count = os.cpu_count()
     print("CPU COUNT: ", cpu_count)
-    for frame_idx in tqdm(range(stride*history, len(all_frames) - stride*future, stride)):
+    for frame_idx in tqdm(range(stride*history, int(300) - stride*future, stride)):
         frame_token = all_frames[frame_idx]
         all_instance_tokens, all_instance_indices = extractor.filter_instances(frame_token, stride, history, future)
         num_insts = len(all_instance_tokens)
+        print("num_insts: ", num_insts)
         with multiprocessing.Pool(processes=cpu_count) as pool:
             inputs = zip(all_instance_tokens, all_instance_indices, [frame_token]*num_insts, [extractor]*num_insts, [ds]*num_insts)
             results = pool.starmap(get_data_for_instance, inputs)
@@ -120,7 +121,7 @@ def create_dataset(path, name, tail_size):
 if __name__ == '__main__':    
     parser = argparse.ArgumentParser()
     parser.add_argument('-s', '--stride', default=10, help='stride size. e.g. 10 means get one data per 10 timesteps', type=int)
-    parser.add_argument('-p', '--path', default=f"{Path.home()}/dlp-dataset/data/", help='absolute path to JSON files, e.g. ~/dlp-dataset/data/', type=str)
+    parser.add_argument('-p', '--path', default=f"{Path.home()}/PycharmProjects/ParkSim/data/", help='absolute path to JSON files, e.g. ~/dlp-dataset/data/', type=str)
     parser.add_argument('-b', '--before', default=10, help='number of previous observations to store in motion history for input', type=int)
     parser.add_argument('-f', '--future', default=10, help='number of future observations to store as trajectory output', type=int)
     parser.add_argument('-i', '--img_size', default=100,

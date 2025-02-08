@@ -78,7 +78,7 @@ def create_all_memmaps(dataset_nums, proportions, num_train, num_val, num_test):
 
 
 if __name__ == '__main__':
-    datasets_to_generate = range(1, 31)
+    datasets_to_generate = range(6, 7)
     custom_dataset_nums = ["../data/DJI_" + str(i).zfill(4) for i in datasets_to_generate]
     proportions = [0.85, 0.1, 0.05]
     train_size = 0

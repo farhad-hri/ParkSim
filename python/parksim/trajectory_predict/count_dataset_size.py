@@ -23,7 +23,7 @@ def count_datasize(dataset_nums):
 
 RUN_LABEL = 'v1'
 if __name__ == '__main__':
-    dataset_nums = dataset_nums = ["../data/DJI_" + str(i).zfill(4) for i in range(7, 23)]
+    dataset_nums = ["../data/DJI_" + str(i).zfill(4) for i in range(6, 7)]
     train_size, val_size, total_size = count_datasize(dataset_nums=dataset_nums)
     print(f"Train Size: {train_size}\nValidation Size: {val_size}\nTotal Size: {total_size}")
 
