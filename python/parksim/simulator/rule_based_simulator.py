@@ -41,11 +41,11 @@ from parksim.utils.get_corners import get_vehicle_corners_from_dict
 from scipy.spatial import ConvexHull
 
 # These parameters should all become ROS param for simulator and vehicle
-spots_data_path = "/ParkSim/data/spots_data.pickle"
-offline_maneuver_path = "/ParkSim/data/parking_maneuvers.pickle"
-waypoints_graph_path = "/ParkSim/data/waypoints_graph.pickle"
-intent_model_path = "/ParkSim/data/smallRegularizedCNN_L0.068_01-29-2022_19-50-35.pth"
-traj_model_path = "/ParkSim/python/parksim/trajectory_predict/intent_transformer/checkpoints/TrajectoryPredictorWithDecoderIntentCrossAttention/lightning_logs/version_1/checkpoints/epoch=52-val_total_loss=0.0458.ckpt"
+spots_data_path = "/PycharmProjects/ParkSim_tc/data/spots_data.pickle"
+offline_maneuver_path = "/PycharmProjects/ParkSim_tc/data/parking_maneuvers.pickle"
+waypoints_graph_path = "/PycharmProjects/ParkSim_tc/data/waypoints_graph.pickle"
+intent_model_path = "/PycharmProjects/ParkSim_tc/data/smallRegularizedCNN_L0.068_01-29-2022_19-50-35.pth"
+traj_model_path = "/PycharmProjects/ParkSim_tc/python/parksim/trajectory_predict/intent_transformer/checkpoints/TrajectoryPredictorWithDecoderIntentCrossAttention/lightning_logs/version_1/checkpoints/epoch=52-val_total_loss=0.0458.ckpt"
 
 
 class RuleBasedSimulator(object):
@@ -131,14 +131,14 @@ class RuleBasedSimulator(object):
         self.y_bound_to_resume_spawning = 70
         self.spawn_interval_mean = params.spawn_interval_mean  # (s)
 
-        self.spots_data_path = "/ParkSim/data/spots_data.pickle"
+        self.spots_data_path = "PycharmProjects/ParkSim_tc/data/spots_data.pickle"
         self.agents_data_path = params.agents_data_path
 
         self.use_existing_agents = params.use_existing_agents
         self.use_existing_obstacles = params.use_existing_obstacles
 
         self.write_log = False
-        self.log_path = "/ParkSim/vehicle_log"
+        self.log_path = "PycharmProjects/ParkSim_tc/vehicle_log"
 
         self.dlpvis = DlpVisualizer(dataset)
         self.vis = vis
@@ -932,7 +932,7 @@ class RuleBasedSimulator(object):
                         velocities.append([s.t - st, s.v.v])
                     savemat(
                         str(Path.home())
-                        + "/ParkSim/vehicle_log/DJI_0012/simulated_vehicle_"
+                        + "PycharmProjects/ParkSim_tc/vehicle_log/DJI_0012/simulated_vehicle_"
                         + str(vehicle.vehicle_id)
                         + ".mat",
                         {"velocity": velocities},
@@ -1068,7 +1068,7 @@ class RuleBasedSimulatorParams:
         self.intent_simulation = False
 
         self.use_existing_agents = True  # replay video data
-        self.agents_data_path = "/ParkSim/data/agents_data_0012.pickle"
+        self.agents_data_path = "/PycharmProjects/ParkSim_tc/data/agents_data_0012.pickle"
 
         # should we replace where the agents park?
         self.use_existing_entrances = (
@@ -1089,10 +1089,10 @@ class RuleBasedSimulatorParams:
 
         # before changing model, don't forget to set: spot selection, loss function
         self.spot_model_path = (
-            "/ParkSim/python/parksim/spot_nn/final_pd_models/selfish_model.pickle"
+            "/PycharmProjects/ParkSim_tc/python/parksim/spot_nn/final_pd_models/selfish_model.pickle"
         )
         self.losses_csv_path = (
-            "/ParkSim/python/parksim/spot_nn/losses.csv"  # where losses are stored
+            "/PycharmProjects/ParkSim_tc/python/parksim/spot_nn/losses.csv"  # where losses are stored
         )
 
         if self.use_nn or self.train_nn:
@@ -1300,7 +1300,7 @@ def main():
 
     home_path = str(Path.home())
     print("Loading dataset...")
-    ds.load(home_path + "/dlp-dataset/data/DJI_0012")
+    ds.load(home_path + "/PycharmProjects/dlp-dataset/data/DJI_0012")
     print("Dataset loaded.")
 
     params = RuleBasedSimulatorParams()
