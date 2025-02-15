@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 import numpy as np
+import matplotlib.pyplot as plt
 
 trajectory_predict_path = os.path.dirname(Path(os.getcwd()))
 data_path = os.path.join(trajectory_predict_path, 'data')
