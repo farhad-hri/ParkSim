@@ -37,12 +37,12 @@ class VehicleBody(BasePolytopeObstacle):
     
     def __post_init__(self):
         if self.vehicle_flag == 0:
-            self.lr = 1.35
-            self.lf = 1.35
-            self.wb = self.lr + self.lf
-            self.w = 1.85
-            self.bf = 2.3
-            self.br = 2.3
+            self.lr = 1.35 # center to rear wheel
+            self.lf = 1.35 # center to front wheel
+            self.wb = self.lr + self.lf # wheelbase
+            self.w = 1.85 # width
+            self.bf = 2.3 # center to front
+            self.br = 2.3 # center to back
             self.l = self.br + self.bf
 
             self.cf = 2.25

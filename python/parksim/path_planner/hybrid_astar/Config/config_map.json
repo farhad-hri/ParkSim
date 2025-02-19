@@ -1,0 +1,16 @@
+{
+  "map-params":
+  {
+    "lot":
+    {
+      "y_min": 0,
+      "x_min": 0,
+      "lane_width": 7.6,
+      "park_width": 2.75,
+      "park_length": 6,
+      "n_rows": 2,
+      "n_spaces": 8,
+      "start": [0, 0, 90.0]
+    }
+  }
+}

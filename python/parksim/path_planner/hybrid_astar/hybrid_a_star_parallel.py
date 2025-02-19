@@ -17,6 +17,15 @@ import numpy as np
 from scipy.spatial import cKDTree
 import time
 
+from timebudget import timebudget
+from multiprocessing import Pool
+import multiprocessing
+# import ray
+
+# ray.init(ignore_reinit_error=True)  # Initialize Ray
+
+from itertools import chain
+
 try:
     from parksim.path_planner.hybrid_astar.dynamic_programming_heuristic import calc_distance_heuristic
     import parksim.path_planner.hybrid_astar.reeds_shepp_path_planning as rs
@@ -248,7 +257,7 @@ def calc_rs_path_cost(reed_shepp_path):
 
     return cost
 
-
+# @ray.remote
 def hybrid_a_star_planning(start, goal, ox, oy, xy_resolution, yaw_resolution):
     """
     start: start node
@@ -312,7 +321,7 @@ def hybrid_a_star_planning(start, goal, ox, oy, xy_resolution, yaw_resolution):
             current, goal_node, config, ox, oy, obstacle_kd_tree)
 
         if is_updated:
-            print("path found")
+            # print("path found")
             break
 
         for neighbor in get_neighbors(current, config, ox, oy,
@@ -682,7 +691,18 @@ def map_lot(type, config_map, Car_obj):
 
     return x_min, x_max, y_min, y_max, p_w, p_l, l_w, n_r, n_s, n_s1, obstacleX, obstacleY, s
 
-def main():
+
+def parallel_run(start, ox, oy, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION, g_list):
+    with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
+        results = pool.starmap(hybrid_a_star_planning, [(start, goal, ox, oy, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION) for goal in g_list])
+    return results
+
+def parallel_ray(start, ox, oy, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION, g_list):
+    futures = [hybrid_a_star_planning.remote(start, goal, ox, oy, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION) for goal in g_list]
+    results = ray.get(futures)
+    return results
+
+if __name__ == '__main__':
     type='lot'
 
     home_path = os.path.abspath(os.getcwd())
@@ -704,50 +724,6 @@ def main():
     ox = obstacleX
     oy = obstacleY
 
-    # ox, oy = [], []
-    #
-    # # Left
-    # for x in np.arange(-3.8-2.5, -3.8+2.5, 0.5):
-    #     ox.append(x)
-    #     oy.append(2.5)
-    #
-    # for y in np.arange(-2.5, 2.5, 0.5):
-    #     ox.append(-3.8+2.5)
-    #     oy.append(y)
-    #
-    # # Right
-    # for x in np.arange(3.8-2.5, 3.8+2.5, 0.5):
-    #     ox.append(x)
-    #     oy.append(2.5)
-    #
-    # for y in np.arange(-2.5, 2.5, 0.5):
-    #     ox.append(3.8-2.5)
-    #     oy.append(y)
-    #
-    # # Top
-    # for x in np.arange(-6, 6, 0.5):
-    #     ox.append(x)
-    #     oy.append(10-0.4)
-
-    # for i in range(60):
-    #     ox.append(i)
-    #     oy.append(0.0)
-    # for i in range(60):
-    #     ox.append(60.0)
-    #     oy.append(i)
-    # for i in range(61):
-    #     ox.append(i)
-    #     oy.append(60.0)
-    # for i in range(61):
-    #     ox.append(0.0)
-    #     oy.append(i)
-    # for i in range(40):
-    #     ox.append(20.0)
-    #     oy.append(i)
-    # for i in range(40):
-    #     ox.append(40.0)
-    #     oy.append(60.0 - i)
-
     # Set Initial parameters
     # start = [-5.0, 4.35, 0]
     wb_2 = Car_obj.wheelBase/2
@@ -768,63 +744,30 @@ def main():
         goal_plot = goal1
         goal_park_spots.append(goal_spot_xy)
 
-    g = goal_park_spots[1][1]
-    goal = [g[0] + wb_2*np.cos(g[2]),  g[1] + wb_2*np.sin(g[2]), g[2]]
+    goal_park_spots = list(chain.from_iterable(goal_park_spots))
+    g_list = [[g[0] + wb_2*np.cos(g[2]),  g[1] + wb_2*np.sin(g[2]), g[2]] for g in goal_park_spots]
 
-    # start = [10.0, 10.0, np.deg2rad(90.0)]
-    # goal = [50.0, 50.0, np.deg2rad(-90.0)]
+    for i in range(3):
+        g_list = g_list + g_list
 
     print("start : ", start)
-    print("goal : ", goal)
 
-    # if show_animation:
-    plt.plot(ox, oy, ".k")
-    rs.plot_arrow(start[0], start[1], start[2], fc='g')
-    rs.plot_arrow(goal[0], goal[1], goal[2])
+    start_t_p = time.time()
 
-    plt.grid(True)
-    plt.axis("equal")
+    results = parallel_run(start, ox, oy, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION, g_list)
 
-    path = hybrid_a_star_planning(
-        start, goal, ox, oy, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION)
+    print("Comp time (parallelized): ", time.time() - start_t_p)
 
-    i=0
-    repeat_run = 10
-    time_all = []
-    while i < repeat_run:
-        start_time = time.time()
-        path = hybrid_a_star_planning(
-            start, goal, ox, oy, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION)
-        i += 1
-        time_all.append(time.time() - start_time)
+    # start_t_r = time.time()
+    #
+    # results_r = parallel_ray(start, ox, oy, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION, g_list)
+    #
+    # print("Comp time (parallelized_ray): ", time.time() - start_t_r)
 
-    print("Mean Comp time: ", np.mean(time_all))
-    print("STD Comp time: ", np.std(time_all))
+    start_t = time.time()
+    for goal in g_list:
+        path = hybrid_a_star_planning(start, goal, ox, oy, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION)
+    print("Comp time: ", time.time() - start_t)
 
-    x = path.x_list
-    y = path.y_list
-    yaw = path.yaw_list
-
-    # if show_animation:
-    repeat= 3
-    for i in range(repeat):
-        start_a = 0
-        for i_x, i_y, i_yaw in zip(x, y, yaw):
-            plt.cla()
-            plt.plot(ox, oy, ".k")
-            plt.plot(x, y, "-r", label="Hybrid A* path")
-            plt.grid(True)
-            plt.axis("equal")
-            plot_car(i_x, i_y, i_yaw)
-            if start_a == 0:
-                plt.pause(2)
-            else:
-                plt.pause(0.01)
-            start_a =+ 1
-
-    plt.show()
-    print(__file__ + " done!!")
-
-
-if __name__ == '__main__':
-    main()
+    # path = hybrid_a_star_planning(
+    #     start, goal, ox, oy, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION)

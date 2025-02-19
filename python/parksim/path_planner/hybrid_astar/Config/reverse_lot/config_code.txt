@@ -1,0 +1,10 @@
+    ## To load the init path
+    sim_results_path = home_path + '/Sim_results/'
+    path = sim_results_path + 'HA_star_path/Init/' + 'g1_all_cars_init_reverse_lot_5cost_thresh_RS.npy'
+
+    with open(path, 'rb') as f:
+        goal_all = np.load(f)
+
+    load_rs = sim_results_path + '/RS_path_adaptive_paper.npy'
+    with open(load_rs, 'rb') as f:
+        goal_rs_all = np.load(f)

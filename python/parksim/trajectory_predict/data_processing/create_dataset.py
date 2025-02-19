@@ -88,7 +88,8 @@ def create_dataset(path, name, tail_size):
     intent_pose = []
     cpu_count = os.cpu_count()
     print("CPU COUNT: ", cpu_count)
-    for frame_idx in tqdm(range(stride*history, int(300) - stride*future, stride)):
+    until_what_frame = len(all_frames)
+    for frame_idx in tqdm(range(stride*history, int(until_what_frame) - stride*future, stride)):
         frame_token = all_frames[frame_idx]
         all_instance_tokens, all_instance_indices = extractor.filter_instances(frame_token, stride, history, future)
         num_insts = len(all_instance_tokens)
@@ -112,10 +113,19 @@ def create_dataset(path, name, tail_size):
 
     if not os.path.exists(DATA_PATH):
         os.mkdir(DATA_PATH)
-    np.save(os.path.join(DATA_PATH, '%s_image_history.npy' % name), image_history)
-    np.save(os.path.join(DATA_PATH,'%s_trajectory_history.npy' % name), trajectory_history)
-    np.save(os.path.join(DATA_PATH, '%s_trajectory_future.npy' % name), trajectory_future)
-    np.save(os.path.join(DATA_PATH, '%s_intent_pose.npy' % name), intent_pose)
+
+    with open(os.path.join(DATA_PATH, '%s_image_history.npy' % name), 'wb') as f:
+        np.save(f, image_history)
+    with open(os.path.join(DATA_PATH,'%s_trajectory_history.npy' % name), 'wb') as f:
+        np.save(f, trajectory_history)
+    with open(os.path.join(DATA_PATH, '%s_trajectory_future.npy' % name), 'wb') as f:
+        np.save(f, trajectory_future)
+    with open(os.path.join(DATA_PATH, '%s_intent_pose.npy' % name), 'wb') as f:
+        np.save(f, intent_pose)
+    # np.save(os.path.join(DATA_PATH, '%s_image_history.npy' % name), image_history)
+    # np.save(os.path.join(DATA_PATH,'%s_trajectory_history.npy' % name), trajectory_history)
+    # np.save(os.path.join(DATA_PATH, '%s_trajectory_future.npy' % name), trajectory_future)
+    # np.save(os.path.join(DATA_PATH, '%s_intent_pose.npy' % name), intent_pose)
 
 
 if __name__ == '__main__':    
