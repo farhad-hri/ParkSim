@@ -493,6 +493,7 @@ def main():
         plot_car(i_x, i_y, i_yaw)
         plt.pause(0.01)
 
+    plt.show()
     print(__file__ + " done!!")
 
 
