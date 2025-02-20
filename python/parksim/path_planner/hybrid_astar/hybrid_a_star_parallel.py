@@ -13,6 +13,7 @@ import sys
 import json
 
 import matplotlib.pyplot as plt
+from matplotlib.patches import Rectangle, Circle
 import numpy as np
 from scipy.spatial import cKDTree
 import time
@@ -29,7 +30,7 @@ from itertools import chain
 try:
     from parksim.path_planner.hybrid_astar.dynamic_programming_heuristic import calc_distance_heuristic
     import parksim.path_planner.hybrid_astar.reeds_shepp_path_planning as rs
-    from parksim.path_planner.hybrid_astar.car import move, check_car_collision, MAX_STEER, WB, plot_car
+    from parksim.path_planner.hybrid_astar.car import move, check_car_collision, MAX_STEER, WB, plot_car, plot_other_car, plot_car_trans
 except Exception:
     raise
 
@@ -75,7 +76,7 @@ class Path:
         self.x_list = x_list
         self.y_list = y_list
         self.yaw_list = yaw_list
-        self.direction_list = direction_list
+        self.direction_list = direction_list #
         self.cost = cost
 
 
@@ -108,7 +109,7 @@ class Config:
 def calc_motion_inputs():
     for steer in np.concatenate((np.linspace(-MAX_STEER, MAX_STEER,
                                              N_STEER), [0.0])):
-        for d in [1, -1]:
+        for d in [2, -2]:
             yield [steer, d]
 
 
@@ -691,65 +692,108 @@ def map_lot(type, config_map, Car_obj):
 
     return x_min, x_max, y_min, y_max, p_w, p_l, l_w, n_r, n_s, n_s1, obstacleX, obstacleY, s
 
+def evaluate_path(path_n):
+    vel = np.diff(path_n[:, :2], axis=0)/MOTION_RESOLUTION # v_x, v_y
+    acc = np.diff(vel[:, :2], axis=0)/MOTION_RESOLUTION
+
+    motion_direction = np.arctan2(vel[:, 1], vel[:, 0])
+    diff_yaw_motion_direction = np.cos(np.abs(path_n[:-1, 2] - motion_direction))
+    reverse = diff_yaw_motion_direction < 0
+    reverse_indices, = np.where(reverse)
+    switchback_indices, = np.where(np.diff(reverse)==True)
+
+    cost = np.sum(np.linalg.norm(acc, axis=1)) + BACK_COST*len(reverse_indices) + SB_COST*len(switchback_indices) + STEER_COST*(np.sum(np.abs(np.diff(path_n[:, 2], axis=0))%(2*np.pi))/MOTION_RESOLUTION)
+
+    return cost
 
 def parallel_run(start, ox, oy, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION, g_list):
     with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
         results = pool.starmap(hybrid_a_star_planning, [(start, goal, ox, oy, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION) for goal in g_list])
     return results
 
+def parallel_cost(path_list):
+    with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
+        costs = pool.starmap(evaluate_path, [(path_1) for path_1 in path_list])
+    return costs
+
 def parallel_ray(start, ox, oy, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION, g_list):
     futures = [hybrid_a_star_planning.remote(start, goal, ox, oy, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION) for goal in g_list]
     results = ray.get(futures)
     return results
 
+type='lot'
+
+home_path = os.path.abspath(os.getcwd())
+
+## Load the configuration files
+config_path = home_path + '/Config/'
+
+with open(config_path + 'config_planner.json') as f:
+    config_planner = json.load(f)
+
+with open(config_path + 'config_map.json') as f:
+    config_map = json.load(f)
+
+Car_obj = Car_class(config_planner)
+x_min, x_max, y_min, y_max, p_w, p_l, l_w, n_r, n_s, n_s1, obstacleX, obstacleY, s = map_lot(type, config_map, Car_obj)
+
+ox = obstacleX
+oy = obstacleY
+
+# Set Initial parameters
+# start = [-5.0, 4.35, 0]
+wb_2 = Car_obj.wheelBase/2
+start = [s[0] + wb_2*np.cos(s[2]),  s[1] + wb_2*np.sin(s[2]), s[2]]
+# goal = [0.0, 0.0, np.deg2rad(-90.0)]
+# goal = [0, 0, np.deg2rad(-90.0)]
+# goal = [0, 0, np.deg2rad(90)]
+park_spots = [5, 9]
+# park_spots_xy: list of centers of park_spots [x, y, 1 if left to center line and 0 if right to center line]
+park_spots_xy = [np.array([x_min + (1 + (i // n_s)) * l_w + (i // n_s1) * p_l + p_l / 2,
+                           y_min + l_w + (i % n_s1) * p_w + p_w / 2, bool(i % n_s <= n_s1 - 1)])
+                 for i in park_spots]
+goal_park_spots = []  # park_spot i ->  goal yaw = 0.0 if 0, and np.pi if 1 -> (x, y, yaw) of goal
+for spot_xy in park_spots_xy:
+    goal1 = np.array([spot_xy[0] - Car_obj.length / 2 + Car_obj.axleToBack, spot_xy[1], 0.0])
+    goal2 = np.array([spot_xy[0] + Car_obj.length / 2 - Car_obj.axleToBack, spot_xy[1], np.pi])
+    goal_spot_xy = [goal1, goal2]
+    goal_plot = goal1
+    goal_park_spots.append(goal_spot_xy)
+
+goal_park_spots = list(chain.from_iterable(goal_park_spots))
+g_list = [[g[0] + wb_2*np.cos(g[2]),  g[1] + wb_2*np.sin(g[2]), g[2]] for g in goal_park_spots]
+# for _ in range(5):
+#     g_list = g_list + g_list
+
+def with_multiprocessing(start, ox, oy, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION):
+    print("Starting function with multiprocessing.")
+    jobs = []
+
+    NUMBER_OF_PROCESSES = len(g_list)
+
+    for i in range(NUMBER_OF_PROCESSES):
+        process = multiprocessing.Process(
+            target=hybrid_a_star_planning,
+            args=(start, g_list[i], ox, oy, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION,)
+        )
+        jobs.append(process)
+
+    for j in jobs:
+        j.start()
+
+    for j in jobs:
+        j.join()
+
+    # with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
+    #     results = pool.starmap(hybrid_a_star_planning, [(start, goal, ox, oy, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION) for goal in g_list])
+    # return results
+
 if __name__ == '__main__':
-    type='lot'
 
-    home_path = os.path.abspath(os.getcwd())
-
-    ## Load the configuration files
-    config_path = home_path + '/Config/'
-
-    with open(config_path + 'config_planner.json') as f:
-        config_planner = json.load(f)
-
-    with open(config_path + 'config_map.json') as f:
-        config_map = json.load(f)
-
-    Car_obj = Car_class(config_planner)
-    x_min, x_max, y_min, y_max, p_w, p_l, l_w, n_r, n_s, n_s1, obstacleX, obstacleY, s = map_lot(type, config_map, Car_obj)
-
+    ## Checking parallel computation
+    # for i in range(3):
+    #     g_list = g_list + g_list
     print("Start Hybrid A* planning")
-
-    ox = obstacleX
-    oy = obstacleY
-
-    # Set Initial parameters
-    # start = [-5.0, 4.35, 0]
-    wb_2 = Car_obj.wheelBase/2
-    start = [s[0] + wb_2*np.cos(s[2]),  s[1] + wb_2*np.sin(s[2]), s[2]]
-    # goal = [0.0, 0.0, np.deg2rad(-90.0)]
-    # goal = [0, 0, np.deg2rad(-90.0)]
-    # goal = [0, 0, np.deg2rad(90)]
-    park_spots = [5, 9]
-    # park_spots_xy: list of centers of park_spots [x, y, 1 if left to center line and 0 if right to center line]
-    park_spots_xy = [np.array([x_min + (1 + (i // n_s)) * l_w + (i // n_s1) * p_l + p_l / 2,
-                               y_min + l_w + (i % n_s1) * p_w + p_w / 2, bool(i % n_s <= n_s1 - 1)])
-                     for i in park_spots]
-    goal_park_spots = []  # park_spot i ->  goal yaw = 0.0 if 0, and np.pi if 1 -> (x, y, yaw) of goal
-    for spot_xy in park_spots_xy:
-        goal1 = np.array([spot_xy[0] - Car_obj.length / 2 + Car_obj.axleToBack, spot_xy[1], 0.0])
-        goal2 = np.array([spot_xy[0] + Car_obj.length / 2 - Car_obj.axleToBack, spot_xy[1], np.pi])
-        goal_spot_xy = [goal1, goal2]
-        goal_plot = goal1
-        goal_park_spots.append(goal_spot_xy)
-
-    goal_park_spots = list(chain.from_iterable(goal_park_spots))
-    g_list = [[g[0] + wb_2*np.cos(g[2]),  g[1] + wb_2*np.sin(g[2]), g[2]] for g in goal_park_spots]
-
-    for i in range(3):
-        g_list = g_list + g_list
-
     print("start : ", start)
 
     start_t_p = time.time()
@@ -758,16 +802,81 @@ if __name__ == '__main__':
 
     print("Comp time (parallelized): ", time.time() - start_t_p)
 
-    # start_t_r = time.time()
-    #
-    # results_r = parallel_ray(start, ox, oy, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION, g_list)
-    #
-    # print("Comp time (parallelized_ray): ", time.time() - start_t_r)
+    path_list = [[np.array([path.x_list, path.y_list, path.yaw_list]).T] for path in results]
+    # cost_2 = evaluate_path(path_list[-2][0])
+    # evaluate_path(path)
+    start_t_c = time.time()
+    costs = parallel_cost(path_list)
+    print("Comp time cost (parallelized): ", time.time() - start_t_p)
+
+    start_t_m = time.time()
+    with_multiprocessing(start, ox, oy, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION)
+    print("Comp time (multiprocess): ", time.time() - start_t_m)
 
     start_t = time.time()
     for goal in g_list:
         path = hybrid_a_star_planning(start, goal, ox, oy, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION)
     print("Comp time: ", time.time() - start_t)
 
+    fig, axes = plt.subplots(2, 2, figsize=(10, 8))
+
+    dynamic_veh_0 = [
+        np.array([x_min + l_w + 2 * p_l + l_w / 4, y_min + l_w + n_s1 * p_w, np.deg2rad(-90.0)])]
+    dynamic_veh_vel = [np.array([0.0, -1.0])]
+
+    ped_0 = [np.array([x_min + l_w + 2 * p_l, y_min + 0.75 * l_w])]
+    ped_vel = [np.array([0.0, 0.5])]
+
+    # car = np.array(
+    #     [[-Car_obj.length/2, -Car_obj.length/2, Car_obj.length/2, Car_obj.length/2, -Car_obj.length/2],
+    #      [Car_obj.width / 2, -Car_obj.width / 2, -Car_obj.width / 2, Car_obj.width / 2, Car_obj.width / 2]])
+    # rotationZ = np.array([[math.cos(p_yaw), -math.sin(p_yaw)],
+    #                       [math.sin(p_yaw), math.cos(p_yaw)]])
+    # car = np.dot(rotationZ, car)
+    # car1 = car + np.array([[p_x], [p_y]])
+
+    circle = Circle((ped_0[0][0], ped_0[0][1]), radius=0.7, facecolor='red')
+    p_yaw = dynamic_veh_0[0][2]
+    p_x = dynamic_veh_0[0][0]
+    p_y = dynamic_veh_0[0][1]
+    i_x, i_y, i_yaw = start[0], start[1], start[2]
+    for i in range(axes.shape[0]):
+        for j in range(axes.shape[1]):
+            # axi = axes[i, j]
+            plot_other_car(p_x, p_y, p_yaw, axes[i, j])
+            circle = Circle((ped_0[0][0], ped_0[0][1]), radius=0.7, facecolor='red')
+            # axes[i, j].plot(circle)
+            axes[i, j].add_artist(circle)
+            axes[i, j].plot(ox, oy, ".k")
+            plot_car(i_x, i_y, i_yaw, axes[i, j])
+            # axes[i, j].axis("equal")
+
+    # Define how many colors you want
+    num_colors = len(results)
+
+    # for reeds_shepp curves
+    cmap = plt.get_cmap('gist_rainbow')
+    colors = [cmap(i) for i in np.linspace(0, 1, num_colors)]
+    for i in range(len(results)):
+        path = results[i]
+        x = path.x_list
+        y = path.y_list
+        yaw = path.yaw_list
+        label_i = 'Path Cost = ' + str(f"{costs[i]:.3f}")
+        axes[i//2, i%2].plot(x, y, color=colors[i], label=label_i)
+        for j in range(len(x)):
+            plot_car_trans(x[j], y[j], yaw[j], axes[i//2, i%2])
+        axes[i // 2, i % 2].legend(fontsize=20)
+
+    # ax.grid(True)
+    # start_t_r = time.time()
+    #
+    # results_r = parallel_ray(start, ox, oy, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION, g_list)
+    #
+    # print("Comp time (parallelized_ray): ", time.time() - start_t_r)
+
+
+    # plt.legend()
+    plt.show()
     # path = hybrid_a_star_planning(
     #     start, goal, ox, oy, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION)
