@@ -17,13 +17,12 @@ from matplotlib.patches import Rectangle, Circle
 import numpy as np
 from scipy.spatial import cKDTree
 import time
+from shapely.geometry import Point, Polygon
 
 from timebudget import timebudget
 from multiprocessing import Pool
 import multiprocessing
 # import ray
-
-from scipy.spatial.transform import Rotation as Rot
 
 # ray.init(ignore_reinit_error=True)  # Initialize Ray
 
@@ -32,15 +31,31 @@ from itertools import chain
 try:
     from parksim.path_planner.hybrid_astar.dynamic_programming_heuristic import calc_distance_heuristic
     import parksim.path_planner.hybrid_astar.reeds_shepp_path_planning as rs
-    from parksim.path_planner.hybrid_astar.car import move, check_car_collision, MAX_STEER, WB, plot_car, plot_other_car, plot_car_trans, plot_other_car_trans, W_BUBBLE_R, LF, LB, W
+    from parksim.path_planner.hybrid_astar.car import move, check_car_collision, MAX_STEER, WB, plot_car, plot_other_car, plot_car_trans
 except Exception:
     raise
 
-XY_GRID_RESOLUTION = 5  # [m]
-YAW_GRID_RESOLUTION = np.deg2rad(20.0)  # [rad]
+XY_GRID_RESOLUTION = 2  # [m]
+YAW_GRID_RESOLUTION = np.deg2rad(10.0)  # [rad]
 MOTION_RESOLUTION = 0.5  # [m] path interpolate resolution
 N_STEER = 3  # number of steer command
 VR = 0.8  # robot radius
+
+## FOV
+long_front = 15.0
+long_back = 5.0
+lateral_bound = 12.0
+
+num_points = 10
+long_points = np.linspace(-long_back, long_front, num=num_points).reshape((-1,1))
+lateral_points = np.linspace(-lateral_bound, lateral_bound, num=num_points).reshape((-1,1))
+
+rect_points = np.vstack((np.hstack((long_points, np.array([-lateral_bound]*num_points).reshape((-1,1)))),
+                         np.hstack((np.array([long_front]*num_points).reshape((-1,1)), lateral_points)),
+                         np.hstack((long_points, np.array([lateral_bound]*num_points).reshape((-1,1)))),
+                         np.hstack((np.array([-long_back]*num_points).reshape((-1,1)), lateral_points))
+                         ))
+
 
 # SB_COST = 100.0  # switch back penalty cost
 SB_COST = 1.0  # switch back penalty cost
@@ -51,10 +66,8 @@ STEER_CHANGE_COST = 0.5  # steer angle change penalty cost
 STEER_COST = 0.5  # steer angle change penalty cost
 H_COST = 1.0  # Heuristic cost
 
-PED_RAD = 0.7
-DYNAMIC_SAFE_NET = 1.0
-
 show_animation = False
+
 
 class Node:
 
@@ -108,7 +121,6 @@ class Config:
         self.min_yaw = round(- math.pi / yaw_resolution) - 1
         self.max_yaw = round(math.pi / yaw_resolution)
         self.yaw_w = round(self.max_yaw - self.min_yaw)
-
 
 def calc_motion_inputs():
     for steer in np.concatenate((np.linspace(-MAX_STEER, MAX_STEER,
@@ -170,7 +182,6 @@ def is_same_grid(n1, n2):
             and n1.yaw_index == n2.yaw_index:
         return True
     return False
-
 
 def analytic_expansion(current, goal, ox, oy, kd_tree):
     start_x = current.x_list[-1]
@@ -462,11 +473,6 @@ def map_lot(type, config_map, Car_obj):
     x_max = int(x_min + (n_r+1)*l_w + 2*n_r*p_l)
     y_max = int(y_min + l_w + n_s1 * p_w + l_w)
 
-    # x_min = s[0] - 10.0*
-    # x_max = s[0] + 10.0
-    # y_min = s[1] - 5.0
-    # y_max = s[1] + 15.0
-
     center_line_park_row_y = [y_min + l_w, y_max - l_w]
 
     center_line_park_row_x_1 = x_min + l_w + p_l
@@ -701,146 +707,69 @@ def map_lot(type, config_map, Car_obj):
 
     return x_min, x_max, y_min, y_max, p_w, p_l, l_w, n_r, n_s, n_s1, obstacleX, obstacleY, s
 
-def dist_to_obst(x, y, yaw, ox, oy):
-    # transform obstacles to base link frame
-    rot = Rot.from_euler('z', yaw).as_matrix()[0:2, 0:2]
-    distance = 0.0
-    for iox, ioy in zip(ox, oy):
-        tx = iox - x
-        ty = ioy - y
-        converted_xy = np.stack([tx, ty]).T @ rot
-        rx, ry = converted_xy[0], converted_xy[1]
-        distance += np.exp(-2*np.max((np.abs(rx - LF), np.abs(ry - W/2.0))))
-
-    return distance
-
-def inter_veh_gap(ego, other):
-    """
-    Using three circle model
-    """
-    x,y,theta = ego[0],ego[1],ego[2]
-    xi,yi,thetai = other[0],other[1],other[2]
-    h = LF/2
-    w = W/2
-    hi = LF/2
-    wi = W/2
-
-    min_dist = float("inf")
-    for i in [-1,0,1]:
-        for j in [-1,0,1]:
-            dist = np.sqrt(( (x + i*(h)*np.cos(theta)) - (xi+ j*(hi)*np.cos(thetai)) )**2
-                     +( (y + i*(h)*np.sin(theta)) - (yi+ j*(hi)*np.sin(thetai)) )**2
-                     ) - (w + wi)
-            min_dist = min(dist, min_dist)
-
-    return np.exp(-2*max(0, min_dist)), min_dist < DYNAMIC_SAFE_NET
-
-def veh_ped_gap(ego, ped):
-    """
-    Using three circle model
-    """
-    x,y,theta = ego[0],ego[1],ego[2]
-    xi,yi = ped[0],ped[1]
-    h = LF/2
-    w = W/2
-
-    wi = PED_RAD
-
-    min_dist = float("inf")
-    for i in [-1,0,1]:
-        dist = np.sqrt(( (x + i*(h)*np.cos(theta)) - (xi) )**2
-                 +( (y + i*(h)*np.sin(theta)) - (yi) )**2
-                 ) - (w + wi)
-        min_dist = min(dist, min_dist)
-
-    return np.exp(-2*max(0, min_dist)), min_dist < DYNAMIC_SAFE_NET
-
-def evaluate_path(path_n, ox, oy, dynamic_veh_path, ped_path):
-
+def evaluate_path(path_n):
     vel = np.diff(path_n[:, :2], axis=0)/MOTION_RESOLUTION # v_x, v_y
     acc = np.diff(vel[:, :2], axis=0)/MOTION_RESOLUTION
 
     motion_direction = np.arctan2(vel[:, 1], vel[:, 0])
-    diff_yaw_motion_direction = np.cos(path_n[:-1, 2] - motion_direction)
+    diff_yaw_motion_direction = np.cos(np.abs(path_n[:-1, 2] - motion_direction))
     reverse = diff_yaw_motion_direction < 0
     reverse_indices, = np.where(reverse)
     switchback_indices, = np.where(np.diff(reverse)==True)
 
-    vectors_yaw = np.hstack((np.cos(path_n[:, 2]).reshape((-1,1)), np.sin(path_n[:, 2]).reshape((-1,1))))
-    cosine_dist = 1 - np.sum(vectors_yaw[:-1]*vectors_yaw[1:], axis=1)
+    cost = np.sum(np.linalg.norm(acc, axis=1)) + BACK_COST*len(reverse_indices) + SB_COST*len(switchback_indices) + STEER_COST*(np.sum(np.abs(np.diff(path_n[:, 2], axis=0))%(2*np.pi))/MOTION_RESOLUTION)
 
-    tox, toy = ox[:], oy[:]
-    obstacle_kd_tree = cKDTree(np.vstack((tox, toy)).T)
-    ego_kd_tree= cKDTree(path_n[:, :2])
-    spars_dist_obst = ego_kd_tree.sparse_distance_matrix(obstacle_kd_tree, max_distance=W_BUBBLE_R).toarray() # path length x number of obstacle points
-    time_step, obst_ind = np.nonzero(spars_dist_obst)
-
-    for i in range(len(dynamic_veh_path)):
-        if dynamic_veh_path[i].shape[0] < path_n.shape[0]:
-            repeat_nums = int(path_n.shape[0] - dynamic_veh_path[i].shape[0])
-            repeat_dynamic_veh = np.repeat(dynamic_veh_path[i][-1].reshape((1,-1)), repeats = repeat_nums, axis=0)
-            dynamic_veh_path[i] = np.vstack((dynamic_veh_path[i], repeat_dynamic_veh))
-
-    for i in range(len(ped_path)):
-        if ped_path[i].shape[0] < path_n.shape[0]:
-            repeat_nums = int(path_n.shape[0] - ped_path[i].shape[0])
-            repeat_ped_veh = np.repeat(ped_path[i][-1].reshape((1,-1)), repeats = repeat_nums, axis=0)
-            ped_path[i] = np.vstack((ped_path[i], repeat_ped_veh))
-
-    sum_dist_obst = 0.0
-    sum_dynamic_obst = 0.0
-    sum_ped = 0.0
-    collision = False
-    for i in range(spars_dist_obst.shape[0]):
-        ## static obstacles
-        obst_ind,  = np.nonzero(spars_dist_obst[i])
-        if len(obst_ind)>0:
-            ox_i = [ox[i] for i in obst_ind]
-            oy_i = [oy[i] for i in obst_ind]
-            x = path_n[i, 0]
-            y = path_n[i, 1]
-            yaw = path_n[i, 2]
-
-            sum_dist_obst += dist_to_obst(x, y, yaw, ox_i, oy_i)
-
-        ## dynamic vehicles
-        dynamic_obst_inds, = np.where([np.linalg.norm(dynamic_veh_path[j][i][:2] - path_n[i, :2]) < 2*W_BUBBLE_R for j in range(len(dynamic_veh_path))])
-        if len(dynamic_obst_inds)>0:
-            for d_obst_i in dynamic_obst_inds:
-                dist_current, collision = inter_veh_gap(path_n[i], dynamic_veh_path[d_obst_i][i])
-                if collision:
-                    return np.inf, collision
-                else:
-                    sum_dynamic_obst += dist_current
-
-        ## dynamic ped
-        ped_inds, = np.where([np.linalg.norm(ped_path[j][i][:2] - path_n[i, :2]) < W_BUBBLE_R for j in range(len(ped_path))])
-        if len(ped_inds) > 0:
-            for ped_i in ped_inds:
-                dist_current, collision =  veh_ped_gap(path_n[i], ped_path[ped_i][i])
-                if collision:
-                    return np.inf, collision
-                else:
-                    sum_ped += dist_current
-
-    cost = 1.0*sum_dynamic_obst + 1.0*sum_ped + 1.0*sum_dist_obst + 0.0*path_n.shape[0] + np.sum(np.linalg.norm(acc, axis=1)) + BACK_COST*len(reverse_indices) + SB_COST*len(switchback_indices) + STEER_COST*(np.sum(cosine_dist))
-
-    return cost, collision
+    return cost
 
 def parallel_run(start, ox, oy, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION, g_list):
     with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
         results = pool.starmap(hybrid_a_star_planning, [(start, goal, ox, oy, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION) for goal in g_list])
     return results
 
-def parallel_cost(path_list, ox, oy):
+def parallel_cost(path_list):
     with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
-        costs = pool.starmap(evaluate_path, [(path_1, ox, oy) for path_1 in path_list])
+        costs = pool.starmap(evaluate_path, [(path_1) for path_1 in path_list])
     return costs
 
 def parallel_ray(start, ox, oy, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION, g_list):
     futures = [hybrid_a_star_planning.remote(start, goal, ox, oy, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION) for goal in g_list]
     results = ray.get(futures)
     return results
+
+def transform_to_local(points, origin):
+    """
+    Transforms a list of points to a local frame defined by an origin and orientation angle.
+
+    :param points: List of (x, y) points in the global frame
+    :param origin: (x, y, theta) of the local frame origin in the global frame
+    :return: Transformed list of points in the local frame
+    """
+    # Compute rotation matrix (2D)
+    angle = origin[2]
+    R = np.array([[np.cos(angle), np.sin(angle)],
+                  [-np.sin(angle), np.cos(angle)]])
+
+    # Apply transformation
+    local_points = (R @ (points - origin[:2]).T).T  # Rotate after translation
+
+    return local_points
+
+def transform_to_global(points, origin):
+    # Compute rotation matrix (2D)
+    angle = origin[2]
+    R = np.array([[np.cos(angle), -np.sin(angle)],
+                  [np.sin(angle), np.cos(angle)]])
+
+    # Apply transformation
+    global_points = (R @ (points).T).T + origin[:2]  # Rotate after translation
+
+    return global_points
+
+def points_in_polygon(points):
+    polygon_vertices = [(-long_back, -lateral_bound), (long_front, -lateral_bound), (long_front, lateral_bound), (-long_back, lateral_bound)]
+    polygon = Polygon(polygon_vertices)  # Create polygon
+    truth_indices  = np.where([polygon.contains(Point(points[i, :])) for i in range(points.shape[0])])
+    return points[truth_indices]
 
 type='lot'
 
@@ -858,13 +787,26 @@ with open(config_path + 'config_map.json') as f:
 Car_obj = Car_class(config_planner)
 x_min, x_max, y_min, y_max, p_w, p_l, l_w, n_r, n_s, n_s1, obstacleX, obstacleY, s = map_lot(type, config_map, Car_obj)
 
-ox = obstacleX
-oy = obstacleY
+start = np.array(s)
+obstacles = np.array([obstacleX, obstacleY]).T
+obstacles_local = transform_to_local(obstacles, start)
+obstacles_FOV_local = points_in_polygon(obstacles_local)
+obstacles_FOV_local = np.vstack((obstacles_FOV_local, rect_points))
+obstacles_FOV_global = transform_to_global(obstacles_FOV_local, start)
+
+fig, ax = plt.subplots()
+
+ax.plot(obstacles[:, 0], obstacles[:, 1], ".k")
+ax.plot(obstacles_FOV_global[:, 0], obstacles_FOV_global[:, 1], ".r")
+wb_2 = Car_obj.wheelBase/2
+start = np.array([start[0] + wb_2*np.cos(start[2]),  s[1] + wb_2*np.sin(start[2]), start[2]])
+plot_car(start[0], start[1], start[2], ax)
+plt.show()
+# ox = obstacleX
+# oy = obstacleY
 
 # Set Initial parameters
 # start = [-5.0, 4.35, 0]
-wb_2 = Car_obj.wheelBase/2
-start = [s[0] + wb_2*np.cos(s[2]),  s[1] + wb_2*np.sin(s[2]), s[2]] # transforming to center of vehicle
 # goal = [0.0, 0.0, np.deg2rad(-90.0)]
 # goal = [0, 0, np.deg2rad(-90.0)]
 # goal = [0, 0, np.deg2rad(90)]
@@ -875,7 +817,6 @@ park_spots_xy = [np.array([x_min + (1 + (i // n_s)) * l_w + (i // n_s1) * p_l + 
                  for i in park_spots]
 goal_park_spots = []  # park_spot i ->  goal yaw = 0.0 if 0, and np.pi if 1 -> (x, y, yaw) of goal
 for spot_xy in park_spots_xy:
-    # transforming center of parking spot to rear axle of vehicle (goal x, y) with appropriate goal yaw
     goal1 = np.array([spot_xy[0] - Car_obj.length / 2 + Car_obj.axleToBack, spot_xy[1], 0.0])
     goal2 = np.array([spot_xy[0] + Car_obj.length / 2 - Car_obj.axleToBack, spot_xy[1], np.pi])
     goal_spot_xy = [goal1, goal2]
@@ -883,9 +824,7 @@ for spot_xy in park_spots_xy:
     goal_park_spots.append(goal_spot_xy)
 
 goal_park_spots = list(chain.from_iterable(goal_park_spots))
-# transforming to center of vehicle
 g_list = [[g[0] + wb_2*np.cos(g[2]),  g[1] + wb_2*np.sin(g[2]), g[2]] for g in goal_park_spots]
-# g_list[0] = [start[0],  start[1] + 15.0, start[2]] # explore (go straight)
 # for _ in range(5):
 #     g_list = g_list + g_list
 
@@ -922,75 +861,34 @@ if __name__ == '__main__':
 
     start_t_p = time.time()
 
-    results = parallel_run(start, ox, oy, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION, g_list)
+    results = parallel_run(start, obstacles_FOV_global[:, 0].tolist(), obstacles_FOV_global[:, 1].tolist(), XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION, g_list)
 
     print("Comp time (parallelized): ", time.time() - start_t_p)
 
     path_list = [[np.array([path.x_list, path.y_list, path.yaw_list]).T] for path in results]
     # cost_2 = evaluate_path(path_list[-2][0])
     # evaluate_path(path)
-
-    dynamic_veh_0 = [
-        np.array([x_min + l_w + 2 * p_l + l_w / 4, y_min + l_w + n_s1 * p_w, np.deg2rad(-90.0)])]
-    dynamic_veh_vel = [np.array([0.0, -1.0])]
-    path_veh = hybrid_a_star_planning(dynamic_veh_0[0], g_list[1], ox, oy, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION)
-    dynamic_veh_path = [np.array([path_veh.x_list, path_veh.y_list, path_veh.yaw_list]).T]
-
-    ped_0 = [np.array([x_min + l_w + 2 * p_l, y_min + 0.75 * l_w])]
-    ped_vel = [1.0*np.array([0.4, 0.1])]
-    ped_path = [np.array([ped_0[j] + i*ped_vel[j] for i in range(len(path_veh.x_list))]) for j in range(len(ped_0))]
-
-    fig, axes = plt.subplots(2, 2, figsize=(10, 8))
-    ## Init plot
-    i_x, i_y, i_yaw = start[0], start[1], start[2]
-    for i in range(axes.shape[0]):
-        for j in range(axes.shape[1]):
-            axes[i, j].plot(ox, oy, ".k")
-            plot_car(i_x, i_y, i_yaw, axes[i, j])
-            time_dynamic=0
-            # plot other cars
-            for veh_i in range(len(dynamic_veh_path)):
-                p_yaw = dynamic_veh_path[veh_i][time_dynamic, 2]
-                p_x = dynamic_veh_path[veh_i][time_dynamic, 0]
-                p_y = dynamic_veh_path[veh_i][time_dynamic, 1]
-                plot_other_car(p_x, p_y, p_yaw, axes[i, j])
-            # plot pedestrians
-            for ped_i in range(len(ped_path)):
-                circle = Circle((ped_path[ped_i][time_dynamic, 0], ped_path[ped_i][time_dynamic, 1]), radius=PED_RAD, facecolor='red')
-                axes[i, j].add_artist(circle)
-
-    for i in range(axes.shape[0]):
-        for j in range(axes.shape[1]):
-            for time_dynamic in range(dynamic_veh_path[0].shape[0]):
-                # plot other cars
-                for veh_i in range(len(dynamic_veh_path)):
-                    p_yaw = dynamic_veh_path[veh_i][time_dynamic, 2]
-                    p_x = dynamic_veh_path[veh_i][time_dynamic,0]
-                    p_y = dynamic_veh_path[veh_i][time_dynamic,1]
-                    plot_other_car_trans(p_x, p_y, p_yaw, axes[i, j])
-                # plot pedestrians
-                for ped_i in range(len(ped_path)):
-                    circle = Circle((ped_path[ped_i][time_dynamic, 0], ped_path[ped_i][time_dynamic, 1]), radius=PED_RAD, facecolor='red', alpha=0.1)
-                    axes[i, j].add_artist(circle)
-
     start_t_c = time.time()
-    costs = []
-    collisions = []
-    for path in path_list:
-        cost_current, collision_current = evaluate_path(path[0], ox, oy, dynamic_veh_path, ped_path)
-        costs.append(cost_current)
-        collisions.append(collision_current)
-    # costs = parallel_cost(path_list, ox, oy)
-    print("Comp time cost (parallelized): ", time.time() - start_t_c)
+    costs = parallel_cost(path_list)
+    print("Comp time cost (parallelized): ", time.time() - start_t_p)
 
     start_t_m = time.time()
-    with_multiprocessing(start, ox, oy, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION)
+    with_multiprocessing(start, obstacles_FOV_global[:, 0].tolist(), obstacles_FOV_global[:, 1].tolist(), XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION)
     print("Comp time (multiprocess): ", time.time() - start_t_m)
 
     start_t = time.time()
     for goal in g_list:
-        path = hybrid_a_star_planning(start, goal, ox, oy, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION)
+        path = hybrid_a_star_planning(start, goal, obstacles_FOV_global[:, 0].tolist(), obstacles_FOV_global[:, 1].tolist(), XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION)
     print("Comp time: ", time.time() - start_t)
+
+    fig, axes = plt.subplots(2, 2, figsize=(10, 8))
+
+    dynamic_veh_0 = [
+        np.array([x_min + l_w + 2 * p_l + l_w / 4, y_min + l_w + n_s1 * p_w, np.deg2rad(-90.0)])]
+    dynamic_veh_vel = [np.array([0.0, -1.0])]
+
+    ped_0 = [np.array([x_min + l_w + 2 * p_l, y_min + 0.75 * l_w])]
+    ped_vel = [np.array([0.0, 0.5])]
 
     # car = np.array(
     #     [[-Car_obj.length/2, -Car_obj.length/2, Car_obj.length/2, Car_obj.length/2, -Car_obj.length/2],
@@ -1000,10 +898,26 @@ if __name__ == '__main__':
     # car = np.dot(rotationZ, car)
     # car1 = car + np.array([[p_x], [p_y]])
 
+    circle = Circle((ped_0[0][0], ped_0[0][1]), radius=0.7, facecolor='red')
+    p_yaw = dynamic_veh_0[0][2]
+    p_x = dynamic_veh_0[0][0]
+    p_y = dynamic_veh_0[0][1]
+    i_x, i_y, i_yaw = start[0], start[1], start[2]
+    for i in range(axes.shape[0]):
+        for j in range(axes.shape[1]):
+            # axi = axes[i, j]
+            plot_other_car(p_x, p_y, p_yaw, axes[i, j])
+            circle = Circle((ped_0[0][0], ped_0[0][1]), radius=0.7, facecolor='red')
+            # axes[i, j].plot(circle)
+            axes[i, j].add_artist(circle)
+            axes[i, j].plot(obstacles_FOV_global[:, 0].tolist(), obstacles_FOV_global[:, 1].tolist(), ".k")
+            plot_car(i_x, i_y, i_yaw, axes[i, j])
             # axes[i, j].axis("equal")
 
     # Define how many colors you want
     num_colors = len(results)
+
+    # for reeds_shepp curves
     cmap = plt.get_cmap('gist_rainbow')
     colors = [cmap(i) for i in np.linspace(0, 1, num_colors)]
     for i in range(len(results)):
@@ -1011,13 +925,10 @@ if __name__ == '__main__':
         x = path.x_list
         y = path.y_list
         yaw = path.yaw_list
-        if not collisions[i]:
-            label_i = 'Path Cost = ' + str(f"{costs[i]:.3f}") + ', Collision = ' + str(collisions[i])
-        else:
-            label_i = 'Path Cost = inf' + ', Collision = True'
-        axes[i // 2, i % 2].plot(x, y, color=colors[i], label=label_i)
+        label_i = 'Path Cost = ' + str(f"{costs[i]:.3f}")
+        axes[i//2, i%2].plot(x, y, color=colors[i], label=label_i)
         for j in range(len(x)):
-            plot_car_trans(x[j], y[j], yaw[j], axes[i // 2, i % 2])
+            plot_car_trans(x[j], y[j], yaw[j], axes[i//2, i%2])
         axes[i // 2, i % 2].legend(fontsize=20)
 
     # ax.grid(True)

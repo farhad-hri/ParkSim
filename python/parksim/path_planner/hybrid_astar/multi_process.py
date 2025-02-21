@@ -5,7 +5,6 @@ NUMBER_OF_PROCESSES = 5
 NUMBER_OF_ITERATIONS = 5
 N = 100000000  # 100 million
 
-
 def sum_all_numbers(n):
     """
     Sums all the numbers from zero to n.

@@ -30,6 +30,7 @@ LF = LB # distance from center to front end
 MAX_STEER = vehicle_config.delta_max  # [rad] maximum steering angle
 
 W_BUBBLE_R = sqrt((vehicle_body.l / 2.0) ** 2 + 1)
+SAFE_MARGIN = 0.3
 
 # vehicle rectangle vertices
 VRX = [LF, LF, -LB, -LB, LF]
@@ -61,8 +62,7 @@ def rectangle_check(x, y, yaw, ox, oy):
         ty = ioy - y
         converted_xy = np.stack([tx, ty]).T @ rot
         rx, ry = converted_xy[0], converted_xy[1]
-        safe_margin = 0.3
-        if not (rx > LF+safe_margin or rx < -(LB+safe_margin) or ry > (W / 2.0+safe_margin) or ry < -(W / 2.0+safe_margin)):
+        if not (rx > LF+SAFE_MARGIN or rx < -(LB+SAFE_MARGIN) or ry > (W / 2.0+SAFE_MARGIN) or ry < -(W / 2.0+SAFE_MARGIN)):
             return False  # no collision
 
     return True  # collision
@@ -105,7 +105,7 @@ def plot_car_trans(x, y, yaw, ax):
         car_outline_y.append(converted_xy[1]+y)
 
     # arrow_x, arrow_y, arrow_yaw = c * 1.5 + x, s * 1.5 + y, yaw
-    arrow_x, arrow_y, arrow_yaw = x, y, yaw
+    # arrow_x, arrow_y, arrow_yaw = x, y, yaw
     # plot_arrow(arrow_x, arrow_y, arrow_yaw, ax)
 
     ax.plot(car_outline_x, car_outline_y, car_color, alpha=0.3)
@@ -125,6 +125,22 @@ def plot_other_car(x, y, yaw, ax):
     plot_arrow(arrow_x, arrow_y, arrow_yaw, ax)
 
     ax.plot(car_outline_x, car_outline_y, car_color)
+
+def plot_other_car_trans(x, y, yaw, ax):
+    car_color = '-r'
+    c, s = cos(yaw), sin(yaw)
+    rot = Rot.from_euler('z', -yaw).as_matrix()[0:2, 0:2]
+    car_outline_x, car_outline_y = [], []
+    for rx, ry in zip(VRX, VRY):
+        converted_xy = np.stack([rx, ry]).T @ rot
+        car_outline_x.append(converted_xy[0]+x)
+        car_outline_y.append(converted_xy[1]+y)
+
+    # arrow_x, arrow_y, arrow_yaw = c * 1.5 + x, s * 1.5 + y, yaw
+    # arrow_x, arrow_y, arrow_yaw = x, y, yaw
+    # plot_arrow(arrow_x, arrow_y, arrow_yaw, ax)
+
+    ax.plot(car_outline_x, car_outline_y, car_color, alpha=0.2)
 
 
 def pi_2_pi(angle):
