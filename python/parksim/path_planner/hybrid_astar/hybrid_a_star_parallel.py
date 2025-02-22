@@ -52,7 +52,9 @@ STEER_COST = 0.5  # steer angle change penalty cost
 H_COST = 1.0  # Heuristic cost
 
 PED_RAD = 0.7
-DYNAMIC_SAFE_NET = 1.0
+DYNAMIC_SAFE_NET = 0.5
+MAX_WAIT_TIME = 5 # actual time (secs)
+INC_WAT_TIME = 1
 
 show_animation = False
 
@@ -710,9 +712,46 @@ def dist_to_obst(x, y, yaw, ox, oy):
         ty = ioy - y
         converted_xy = np.stack([tx, ty]).T @ rot
         rx, ry = converted_xy[0], converted_xy[1]
-        distance += np.exp(-2*np.max((np.abs(rx - LF), np.abs(ry - W/2.0))))
+        # same dist_to_obst, increase sharp -> less penalty
+        sharp = 3
+        distance += np.exp(-sharp*np.max((np.abs(rx - LF), np.abs(ry - W/2.0))))
 
     return distance
+
+def inter_veh_gap_vect(ego, others):
+    """
+    Using three-circle model, vectorized for multiple dynamic obstacles.
+    ego: (3,) -> single ego vehicle [x, y, theta]
+    others: (N, 3) -> multiple other vehicles [x, y, theta] for N obstacles
+    """
+    x, y, theta = ego[0], ego[1], ego[2]
+    xi, yi, thetai = others[:, 0], others[:, 1], others[:, 2]  # Shape: (N,)
+
+    h, w = LF / 2, W / 2
+    hi, wi = LF / 2, W / 2
+
+    offsets = np.array([-1, 0, 1])  # Offsets for the three-circle model
+
+    # Compute expanded positions for ego vehicle (3 points)
+    ego_x = x + offsets * h * np.cos(theta)  # Shape: (3,)
+    ego_y = y + offsets * h * np.sin(theta)  # Shape: (3,)
+
+    # Compute expanded positions for other vehicles (N x 3 points)
+    other_x = xi[:, None] + offsets[None, :] * hi * np.cos(thetai[:, None])  # Shape: (N, 3)
+    other_y = yi[:, None] + offsets[None, :] * hi * np.sin(thetai[:, None])  # Shape: (N, 3)
+
+    # Compute pairwise distances (broadcasted over 3x3 grid)
+    dist_matrix = np.sqrt((ego_x[None, :, None] - other_x[:, None, :])**2 +
+                          (ego_y[None, :, None] - other_y[:, None, :])**2) - (w + wi)  # Shape: (N, 3, 3)
+
+    # Find the minimum distance for each dynamic obstacle
+    min_dist = np.min(dist_matrix, axis=(1, 2))  # Shape: (N,)
+
+    # Compute cost and collision flags
+    cost = np.exp(-2 * np.maximum(0, min_dist))
+    collisions = min_dist < DYNAMIC_SAFE_NET  # Boolean array (N,)
+
+    return cost, collisions
 
 def inter_veh_gap(ego, other):
     """
@@ -755,10 +794,48 @@ def veh_ped_gap(ego, ped):
 
     return np.exp(-2*max(0, min_dist)), min_dist < DYNAMIC_SAFE_NET
 
+
+def veh_ped_gap_vect(ego, peds):
+    """
+    Vectorized three-circle model for vehicle-pedestrian distance computation.
+
+    ego: (3,) -> single vehicle [x, y, theta]
+    peds: (N, 2) -> multiple pedestrians [x, y]
+
+    Returns:
+    cost: (N,) -> cost for each pedestrian
+    collisions: (N,) -> boolean array indicating collision status
+    """
+    x, y, theta = ego[0], ego[1], ego[2]
+    xi, yi = peds[:, 0], peds[:, 1]  # Shape: (N,)
+
+    h, w = LF / 2, W / 2  # Half-length and half-width of vehicle
+    wi = PED_RAD  # Radius of pedestrian model
+
+    offsets = np.array([-1, 0, 1])  # Three points along vehicle's length
+
+    # Compute expanded positions for the ego vehicle (3 points)
+    ego_x = x + offsets * h * np.cos(theta)  # Shape: (3,)
+    ego_y = y + offsets * h * np.sin(theta)  # Shape: (3,)
+
+    # Compute pairwise distances using broadcasting
+    dist_matrix = np.sqrt((ego_x[:, None] - xi[None, :]) ** 2 +
+                          (ego_y[:, None] - yi[None, :]) ** 2) - (w + wi)  # Shape: (3, N)
+
+    # Find the minimum distance for each pedestrian
+    min_dist = np.min(dist_matrix, axis=0)  # Shape: (N,)
+
+    # Compute cost and collision flags
+    cost = np.exp(-2 * np.maximum(0, min_dist))
+    collisions = min_dist < DYNAMIC_SAFE_NET  # Boolean array (N,)
+
+    return cost, collisions
+
+
 def evaluate_path(path_n, ox, oy, dynamic_veh_path, ped_path):
 
     vel = np.diff(path_n[:, :2], axis=0)/MOTION_RESOLUTION # v_x, v_y
-    acc = np.diff(vel[:, :2], axis=0)/MOTION_RESOLUTION
+    acc = np.diff(vel[:, :2], axis=0)/MOTION_RESOLUTION # a_x, a_y
 
     motion_direction = np.arctan2(vel[:, 1], vel[:, 0])
     diff_yaw_motion_direction = np.cos(path_n[:-1, 2] - motion_direction)
@@ -775,24 +852,9 @@ def evaluate_path(path_n, ox, oy, dynamic_veh_path, ped_path):
     spars_dist_obst = ego_kd_tree.sparse_distance_matrix(obstacle_kd_tree, max_distance=W_BUBBLE_R).toarray() # path length x number of obstacle points
     time_step, obst_ind = np.nonzero(spars_dist_obst)
 
-    for i in range(len(dynamic_veh_path)):
-        if dynamic_veh_path[i].shape[0] < path_n.shape[0]:
-            repeat_nums = int(path_n.shape[0] - dynamic_veh_path[i].shape[0])
-            repeat_dynamic_veh = np.repeat(dynamic_veh_path[i][-1].reshape((1,-1)), repeats = repeat_nums, axis=0)
-            dynamic_veh_path[i] = np.vstack((dynamic_veh_path[i], repeat_dynamic_veh))
-
-    for i in range(len(ped_path)):
-        if ped_path[i].shape[0] < path_n.shape[0]:
-            repeat_nums = int(path_n.shape[0] - ped_path[i].shape[0])
-            repeat_ped_veh = np.repeat(ped_path[i][-1].reshape((1,-1)), repeats = repeat_nums, axis=0)
-            ped_path[i] = np.vstack((ped_path[i], repeat_ped_veh))
-
+    ## Static obstacles
     sum_dist_obst = 0.0
-    sum_dynamic_obst = 0.0
-    sum_ped = 0.0
-    collision = False
     for i in range(spars_dist_obst.shape[0]):
-        ## static obstacles
         obst_ind,  = np.nonzero(spars_dist_obst[i])
         if len(obst_ind)>0:
             ox_i = [ox[i] for i in obst_ind]
@@ -803,29 +865,73 @@ def evaluate_path(path_n, ox, oy, dynamic_veh_path, ped_path):
 
             sum_dist_obst += dist_to_obst(x, y, yaw, ox_i, oy_i)
 
-        ## dynamic vehicles
-        dynamic_obst_inds, = np.where([np.linalg.norm(dynamic_veh_path[j][i][:2] - path_n[i, :2]) < 2*W_BUBBLE_R for j in range(len(dynamic_veh_path))])
-        if len(dynamic_obst_inds)>0:
-            for d_obst_i in dynamic_obst_inds:
-                dist_current, collision = inter_veh_gap(path_n[i], dynamic_veh_path[d_obst_i][i])
-                if collision:
-                    return np.inf, collision
+    ## extrapolate the predictions
+    # for i in range(len(dynamic_veh_path)):
+    #     if dynamic_veh_path[i].shape[0] < path_n.shape[0]:
+    #         repeat_nums = int(path_n.shape[0] - dynamic_veh_path[i].shape[0])
+    #         repeat_dynamic_veh = np.repeat(dynamic_veh_path[i][-1].reshape((1,-1)), repeats = repeat_nums, axis=0)
+    #         dynamic_veh_path[i] = np.vstack((dynamic_veh_path[i], repeat_dynamic_veh))
+    #
+    # for i in range(len(ped_path)):
+    #     if ped_path[i].shape[0] < path_n.shape[0]:
+    #         repeat_nums = int(path_n.shape[0] - ped_path[i].shape[0])
+    #         repeat_ped_veh = np.repeat(ped_path[i][-1].reshape((1,-1)), repeats = repeat_nums, axis=0)
+    #         ped_path[i] = np.vstack((ped_path[i], repeat_ped_veh))
+
+    collision = True
+    for curr_wait_time in range(MAX_WAIT_TIME+1):
+        sum_dynamic_obst = 0.0
+        sum_ped = 0.0
+        repeat_path_n = np.repeat(path_n[0].reshape((1,-1)), repeats = int(curr_wait_time/MOTION_RESOLUTION), axis=0)
+        path_n_curr = np.vstack((repeat_path_n, path_n))
+        for i in range(path_n_curr.shape[0]):
+            ## dynamic vehicles
+            dynamic_obst_inds, = np.where([np.linalg.norm(dynamic_veh_path[j][i][:2] - path_n_curr[i, :2]) < 2*W_BUBBLE_R for j in range(len(dynamic_veh_path))])
+            if len(dynamic_obst_inds) > 0:
+                dynamic_veh_path_close = np.array([dynamic_veh_path[d_obst_i][i] for d_obst_i in dynamic_obst_inds])
+                distances, collisions = inter_veh_gap_vect(path_n_curr[i], dynamic_veh_path_close)
+                if np.any(collisions):
+                    collision = True
+                    break
                 else:
-                    sum_dynamic_obst += dist_current
+                    collision = False
+                    sum_dynamic_obst += np.sum(distances)
+            else:
+                collision = False
+                # for d_obst_i in dynamic_obst_inds:
+                #     dist_current, collision = inter_veh_gap(path_n[i], dynamic_veh_path[d_obst_i][i])
+                #     if collision:
+                #         return np.inf, collision
+                #     else:
+                #         sum_dynamic_obst += dist_current
 
-        ## dynamic ped
-        ped_inds, = np.where([np.linalg.norm(ped_path[j][i][:2] - path_n[i, :2]) < W_BUBBLE_R for j in range(len(ped_path))])
-        if len(ped_inds) > 0:
-            for ped_i in ped_inds:
-                dist_current, collision =  veh_ped_gap(path_n[i], ped_path[ped_i][i])
-                if collision:
-                    return np.inf, collision
+            ## dynamic ped
+            ped_inds, = np.where([np.linalg.norm(ped_path[j][i][:2] - path_n_curr[i, :2]) < W_BUBBLE_R for j in range(len(ped_path))])
+            if len(ped_inds) > 0:
+                dynamic_veh_path_close = np.array([ped_path[ped_i][i] for ped_i in ped_inds])
+                distances, collisions = veh_ped_gap_vect(path_n_curr[i], dynamic_veh_path_close)
+                if np.any(collisions):
+                    collision = True
+                    break
                 else:
-                    sum_ped += dist_current
+                    collision = False
+                    sum_ped += np.sum(distances)
+            else:
+                collision = False
+                # for ped_i in ped_inds:
+                #     dist_current, collision =  veh_ped_gap(path_n[i], ped_path[ped_i][i])
+                #     if collision:
+                #         return np.inf, collision
+                #     else:
+                #         sum_ped += dist_current
 
-    cost = 1.0*sum_dynamic_obst + 1.0*sum_ped + 1.0*sum_dist_obst + 0.0*path_n.shape[0] + np.sum(np.linalg.norm(acc, axis=1)) + BACK_COST*len(reverse_indices) + SB_COST*len(switchback_indices) + STEER_COST*(np.sum(cosine_dist))
+        if not collision:
+            break
 
-    return cost, collision
+    cost = (curr_wait_time + 1.0*sum_dist_obst + 1.0*sum_dynamic_obst + 1.0*sum_ped +
+            np.sum(np.linalg.norm(acc, axis=1)) + BACK_COST*len(reverse_indices) + SB_COST*len(switchback_indices) + STEER_COST*(np.sum(cosine_dist)))
+
+    return cost, collision, curr_wait_time
 
 def parallel_run(start, ox, oy, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION, g_list):
     with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
@@ -885,6 +991,7 @@ for spot_xy in park_spots_xy:
 goal_park_spots = list(chain.from_iterable(goal_park_spots))
 # transforming to center of vehicle
 g_list = [[g[0] + wb_2*np.cos(g[2]),  g[1] + wb_2*np.sin(g[2]), g[2]] for g in goal_park_spots]
+# g_list = g_list[1:]
 # g_list[0] = [start[0],  start[1] + 15.0, start[2]] # explore (go straight)
 # for _ in range(5):
 #     g_list = g_list + g_list
@@ -913,10 +1020,6 @@ def with_multiprocessing(start, ox, oy, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION)
     # return results
 
 if __name__ == '__main__':
-
-    ## Checking parallel computation
-    # for i in range(3):
-    #     g_list = g_list + g_list
     print("Start Hybrid A* planning")
     print("start : ", start)
 
@@ -927,18 +1030,44 @@ if __name__ == '__main__':
     print("Comp time (parallelized): ", time.time() - start_t_p)
 
     path_list = [[np.array([path.x_list, path.y_list, path.yaw_list]).T] for path in results]
+
+    longest_path_to_spot = max([len(path[0]) for path in path_list])
+    length_preds = int(longest_path_to_spot + MAX_WAIT_TIME / MOTION_RESOLUTION)
     # cost_2 = evaluate_path(path_list[-2][0])
     # evaluate_path(path)
 
     dynamic_veh_0 = [
         np.array([x_min + l_w + 2 * p_l + l_w / 4, y_min + l_w + n_s1 * p_w, np.deg2rad(-90.0)])]
-    dynamic_veh_vel = [np.array([0.0, -1.0])]
-    path_veh = hybrid_a_star_planning(dynamic_veh_0[0], g_list[1], ox, oy, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION)
-    dynamic_veh_path = [np.array([path_veh.x_list, path_veh.y_list, path_veh.yaw_list]).T]
+    dynamic_veh_vel = [np.array([0.0, -0.1, 0.0])]
+    dynamic_veh_parking = [0]
+    dynamic_veh_path = []
 
-    ped_0 = [np.array([x_min + l_w + 2 * p_l, y_min + 0.75 * l_w])]
-    ped_vel = [1.0*np.array([0.4, 0.1])]
-    ped_path = [np.array([ped_0[j] + i*ped_vel[j] for i in range(len(path_veh.x_list))]) for j in range(len(ped_0))]
+    for veh_i, veh_parking in enumerate(dynamic_veh_parking):
+
+        if veh_parking:
+            ## dynamic_veh to spot
+            path_veh = hybrid_a_star_planning(dynamic_veh_0[0], g_list[1], ox, oy, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION)
+            extra_time_steps = int(length_preds - len(path_veh.x_list))
+            path_veh_n = np.array([path_veh.x_list, path_veh.y_list, path_veh.yaw_list]).T
+            last_state = path_veh_n[-1]
+            repeat_veh = np.repeat(last_state.reshape((1, -1)), repeats=extra_time_steps, axis=0)
+            path_veh_n = np.vstack((path_veh_n, repeat_veh))
+        else:
+            ## dynamic_veh constant velocity
+            veh_vel = dynamic_veh_vel[veh_i]
+            veh_0 = dynamic_veh_0[veh_i]
+            # straight_goal = dynamic_veh_0[0] + np.array([0.0, -15.0, 0.0])
+            path_veh_n = np.array([veh_0 + i*veh_vel for i in range(length_preds)])
+
+        dynamic_veh_path.append(path_veh_n)
+
+    ## veh to a parking spot
+    # ped_0 = [np.array([x_min + l_w + 2 * p_l, y_min + 0.75 * l_w])]
+    # ped_vel = [0.5*np.array([0.4, 0.1])]
+    ## straight veh
+    ped_0 = [np.array([x_min + 2*l_w + 2 * p_l, y_min + 1 * l_w + 1*p_w])]
+    ped_vel = [np.array([0.0, 0.2])]
+    ped_path = [np.array([ped_0[j] + i*ped_vel[j] for i in range(length_preds)]) for j in range(len(ped_0))]
 
     fig, axes = plt.subplots(2, 2, figsize=(10, 8))
     ## Init plot
@@ -946,6 +1075,9 @@ if __name__ == '__main__':
     for i in range(axes.shape[0]):
         for j in range(axes.shape[1]):
             axes[i, j].plot(ox, oy, ".k")
+            # Set axis limits
+            axes[i, j].set_xlim(x_min-1, x_max + 1)
+            axes[i, j].set_ylim(y_min-1, y_max + 1)
             plot_car(i_x, i_y, i_yaw, axes[i, j])
             time_dynamic=0
             # plot other cars
@@ -976,10 +1108,12 @@ if __name__ == '__main__':
     start_t_c = time.time()
     costs = []
     collisions = []
+    wait_times = []
     for path in path_list:
-        cost_current, collision_current = evaluate_path(path[0], ox, oy, dynamic_veh_path, ped_path)
+        cost_current, collision_current, wait_time_current = evaluate_path(path[0], ox, oy, dynamic_veh_path, ped_path)
         costs.append(cost_current)
         collisions.append(collision_current)
+        wait_times.append(wait_time_current)
     # costs = parallel_cost(path_list, ox, oy)
     print("Comp time cost (parallelized): ", time.time() - start_t_c)
 
@@ -1012,9 +1146,9 @@ if __name__ == '__main__':
         y = path.y_list
         yaw = path.yaw_list
         if not collisions[i]:
-            label_i = 'Path Cost = ' + str(f"{costs[i]:.3f}") + ', Collision = ' + str(collisions[i])
+            label_i = 'Path Cost = ' + str(f"{costs[i]:.3f}") + ', Collision = ' + str(collisions[i]) + ', Wait = ' + str(wait_times[i]) + ' s'
         else:
-            label_i = 'Path Cost = inf' + ', Collision = True'
+            label_i = 'Path Cost = inf' + ', Collision = True' + ', Wait = ' + str(wait_times[i]) + ' s'
         axes[i // 2, i % 2].plot(x, y, color=colors[i], label=label_i)
         for j in range(len(x)):
             plot_car_trans(x[j], y[j], yaw[j], axes[i // 2, i % 2])
