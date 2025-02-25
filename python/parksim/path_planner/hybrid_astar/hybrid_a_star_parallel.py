@@ -56,6 +56,9 @@ DYNAMIC_SAFE_NET = 0.5
 MAX_WAIT_TIME = 5 # actual time (secs)
 INC_WAT_TIME = 1
 
+V_MAX = 2.0
+A_MAX = 2*V_MAX/MOTION_RESOLUTION
+
 show_animation = False
 
 class Node:
@@ -115,7 +118,7 @@ class Config:
 def calc_motion_inputs():
     for steer in np.concatenate((np.linspace(-MAX_STEER, MAX_STEER,
                                              N_STEER), [0.0])):
-        for d in [2, -2]:
+        for d in [V_MAX, -V_MAX]:
             yield [steer, d]
 
 
@@ -457,7 +460,7 @@ def map_lot(type, config_map, Car_obj):
     n_s = config_map['map-params'][type]['n_spaces']
 
     s[0] = s[0] + l_w + 2*p_l + 0.75*l_w
-    s[1] = s[1] + 0.2*l_w
+    s[1] = s[1] + 0.2*l_w # 0.8*l_w for -np.deg2rad(s[2]) (-90 deg)
 
     n_s1 = int(n_s/2)
 
@@ -837,13 +840,27 @@ def evaluate_path(path_n, ox, oy, dynamic_veh_path, ped_path):
     vel = np.diff(path_n[:, :2], axis=0)/MOTION_RESOLUTION # v_x, v_y
     acc = np.diff(vel[:, :2], axis=0)/MOTION_RESOLUTION # a_x, a_y
 
-    motion_direction = np.arctan2(vel[:, 1], vel[:, 0])
-    diff_yaw_motion_direction = np.cos(path_n[:-1, 2] - motion_direction)
-    reverse = diff_yaw_motion_direction < 0
+    # filter yaw
+    path_n[:, 2] = np.arctan2(np.sin(path_n[:, 2]), np.cos(path_n[:, 2]))
+    # yaw_pos_to_pi = np.where(np.logical_and(path_n[:-1, 2] > 0,  np.abs(path_n[1:, 2] + np.pi) < 1e-6))[0]
+    # path_n[yaw_pos_to_pi+1, 2] = np.pi
+
+    vel_norm = np.linalg.norm(vel, axis=1)
+    zero_vel_ind =  np.where(vel_norm == 0)[0]
+    vel_unit = vel / vel_norm[:, np.newaxis]
+    vel_unit[np.isnan(vel_unit)] = 0.0
+    vectors_yaw = np.hstack((np.cos(path_n[:, 2]).reshape((-1, 1)), np.sin(path_n[:, 2]).reshape((-1, 1))))
+    reverse = np.sum(vel_unit * vectors_yaw[:-1], axis=1) < 0
+    reverse[zero_vel_ind] = reverse[zero_vel_ind-1]
+
+    ## old reverse logic
+    # motion_direction = np.arctan2(vel[:, 1], vel[:, 0])
+    # diff_yaw_motion_direction = np.cos(path_n[:-1, 2] - motion_direction)
+    # reverse = diff_yaw_motion_direction < 0
+
     reverse_indices, = np.where(reverse)
     switchback_indices, = np.where(np.diff(reverse)==True)
 
-    vectors_yaw = np.hstack((np.cos(path_n[:, 2]).reshape((-1,1)), np.sin(path_n[:, 2]).reshape((-1,1))))
     cosine_dist = 1 - np.sum(vectors_yaw[:-1]*vectors_yaw[1:], axis=1)
 
     tox, toy = ox[:], oy[:]
@@ -928,8 +945,8 @@ def evaluate_path(path_n, ox, oy, dynamic_veh_path, ped_path):
         if not collision:
             break
 
-    cost = (curr_wait_time + 1.0*sum_dist_obst + 1.0*sum_dynamic_obst + 1.0*sum_ped +
-            np.sum(np.linalg.norm(acc, axis=1)) + BACK_COST*len(reverse_indices) + SB_COST*len(switchback_indices) + STEER_COST*(np.sum(cosine_dist)))
+    cost = (0.0*len(path_n) + curr_wait_time + 0.0*sum_dist_obst + 0.0*sum_dynamic_obst + 0.0*sum_ped +
+            0.0*np.sum(np.linalg.norm(acc, axis=1)/A_MAX) + 1.0*BACK_COST*len(reverse_indices) + 0.0*SB_COST*len(switchback_indices) + STEER_COST*(np.sum(cosine_dist)/2))
 
     return cost, collision, curr_wait_time
 
@@ -1038,7 +1055,7 @@ if __name__ == '__main__':
 
     dynamic_veh_0 = [
         np.array([x_min + l_w + 2 * p_l + l_w / 4, y_min + l_w + n_s1 * p_w, np.deg2rad(-90.0)])]
-    dynamic_veh_vel = [np.array([0.0, -0.1, 0.0])]
+    dynamic_veh_vel = [np.array([0.0, -1.0, 0.0])]
     dynamic_veh_parking = [0]
     dynamic_veh_path = []
 
@@ -1079,31 +1096,31 @@ if __name__ == '__main__':
             axes[i, j].set_xlim(x_min-1, x_max + 1)
             axes[i, j].set_ylim(y_min-1, y_max + 1)
             plot_car(i_x, i_y, i_yaw, axes[i, j])
-            time_dynamic=0
-            # plot other cars
-            for veh_i in range(len(dynamic_veh_path)):
-                p_yaw = dynamic_veh_path[veh_i][time_dynamic, 2]
-                p_x = dynamic_veh_path[veh_i][time_dynamic, 0]
-                p_y = dynamic_veh_path[veh_i][time_dynamic, 1]
-                plot_other_car(p_x, p_y, p_yaw, axes[i, j])
-            # plot pedestrians
-            for ped_i in range(len(ped_path)):
-                circle = Circle((ped_path[ped_i][time_dynamic, 0], ped_path[ped_i][time_dynamic, 1]), radius=PED_RAD, facecolor='red')
-                axes[i, j].add_artist(circle)
+            # time_dynamic=0
+            # # plot other cars
+            # for veh_i in range(len(dynamic_veh_path)):
+            #     p_yaw = dynamic_veh_path[veh_i][time_dynamic, 2]
+            #     p_x = dynamic_veh_path[veh_i][time_dynamic, 0]
+            #     p_y = dynamic_veh_path[veh_i][time_dynamic, 1]
+            #     plot_other_car(p_x, p_y, p_yaw, axes[i, j])
+            # # plot pedestrians
+            # for ped_i in range(len(ped_path)):
+            #     circle = Circle((ped_path[ped_i][time_dynamic, 0], ped_path[ped_i][time_dynamic, 1]), radius=PED_RAD, facecolor='red')
+            #     axes[i, j].add_artist(circle)
 
-    for i in range(axes.shape[0]):
-        for j in range(axes.shape[1]):
-            for time_dynamic in range(dynamic_veh_path[0].shape[0]):
-                # plot other cars
-                for veh_i in range(len(dynamic_veh_path)):
-                    p_yaw = dynamic_veh_path[veh_i][time_dynamic, 2]
-                    p_x = dynamic_veh_path[veh_i][time_dynamic,0]
-                    p_y = dynamic_veh_path[veh_i][time_dynamic,1]
-                    plot_other_car_trans(p_x, p_y, p_yaw, axes[i, j])
-                # plot pedestrians
-                for ped_i in range(len(ped_path)):
-                    circle = Circle((ped_path[ped_i][time_dynamic, 0], ped_path[ped_i][time_dynamic, 1]), radius=PED_RAD, facecolor='red', alpha=0.1)
-                    axes[i, j].add_artist(circle)
+    # for i in range(axes.shape[0]):
+    #     for j in range(axes.shape[1]):
+    #         for time_dynamic in range(dynamic_veh_path[0].shape[0]):
+    #             # plot other cars
+    #             for veh_i in range(len(dynamic_veh_path)):
+    #                 p_yaw = dynamic_veh_path[veh_i][time_dynamic, 2]
+    #                 p_x = dynamic_veh_path[veh_i][time_dynamic,0]
+    #                 p_y = dynamic_veh_path[veh_i][time_dynamic,1]
+    #                 plot_other_car_trans(p_x, p_y, p_yaw, axes[i, j])
+    #             # plot pedestrians
+    #             for ped_i in range(len(ped_path)):
+    #                 circle = Circle((ped_path[ped_i][time_dynamic, 0], ped_path[ped_i][time_dynamic, 1]), radius=PED_RAD, facecolor='red', alpha=0.1)
+    #                 axes[i, j].add_artist(circle)
 
     start_t_c = time.time()
     costs = []
