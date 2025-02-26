@@ -29,8 +29,8 @@ LB = vehicle_body.l / 2 # distance from center to rear end
 LF = LB # distance from center to front end
 MAX_STEER = vehicle_config.delta_max  # [rad] maximum steering angle
 
-W_BUBBLE_R = sqrt((vehicle_body.l / 2.0) ** 2 + 1)
-SAFE_MARGIN = 0.3
+W_BUBBLE_R = sqrt((vehicle_body.l / 2.0) ** 2 + vehicle_body.w**2) # using inf-norm (square) for detecting stat obstacles
+SAFE_MARGIN = 0.2
 
 # vehicle rectangle vertices
 VRX = [LF, LF, -LB, -LB, LF]

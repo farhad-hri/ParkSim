@@ -51,8 +51,12 @@ STEER_CHANGE_COST = 0.5  # steer angle change penalty cost
 STEER_COST = 0.5  # steer angle change penalty cost
 H_COST = 1.0  # Heuristic cost
 
+## only to evaluate path
+COS_COST = 1.0 # cosine distance cost, aka, change in heading
+
 PED_RAD = 0.7
 DYNAMIC_SAFE_NET = 0.5
+DYNAMIC_SAFE_NET_PED = 0.9
 MAX_WAIT_TIME = 5 # actual time (secs)
 INC_WAT_TIME = 1
 
@@ -511,7 +515,7 @@ def map_lot(type, config_map, Car_obj):
 
         ## Car
         for i in range(car1.shape[1]-1):
-            line = np.linspace(car1[:, i], car1[:, i+1])
+            line = np.linspace(car1[:, i], car1[:, i+1], num = 10, endpoint=False)
             obstacleX = obstacleX + line[:, 0].tolist()
             obstacleY = obstacleY + line[:, 1].tolist()
 
@@ -544,7 +548,7 @@ def map_lot(type, config_map, Car_obj):
     for j in j_indices:
 
         if j==2:
-            p_yaw = 10.0*np.pi/180
+            p_yaw = 0.0*np.pi/180
             p_y = y_min + l_w + j * p_w + p_w / 2 - 0.1 # -0.1 is disturbance
         else:
             p_yaw = 0.0
@@ -564,7 +568,7 @@ def map_lot(type, config_map, Car_obj):
 
         # ## Car
         for i in range(car1.shape[1]-1):
-            line = np.linspace(car1[:, i], car1[:, i+1])
+            line = np.linspace(car1[:, i], car1[:, i+1], num = 10, endpoint=False)
             obstacleX = obstacleX + line[:, 0].tolist()
             obstacleY = obstacleY + line[:, 1].tolist()
 
@@ -610,7 +614,7 @@ def map_lot(type, config_map, Car_obj):
 
         ## Car
         for i in range(car1.shape[1]-1):
-            line = np.linspace(car1[:, i], car1[:, i+1])
+            line = np.linspace(car1[:, i], car1[:, i+1], num = 10, endpoint=False)
             obstacleX = obstacleX + line[:, 0].tolist()
             obstacleY = obstacleY + line[:, 1].tolist()
 
@@ -656,7 +660,7 @@ def map_lot(type, config_map, Car_obj):
 
         ## Car
         for i in range(car1.shape[1] - 1):
-            line = np.linspace(car1[:, i], car1[:, i + 1])
+            line = np.linspace(car1[:, i], car1[:, i + 1], num = 10, endpoint=False)
             obstacleX = obstacleX + line[:, 0].tolist()
             obstacleY = obstacleY + line[:, 1].tolist()
 
@@ -709,17 +713,20 @@ def map_lot(type, config_map, Car_obj):
 def dist_to_obst(x, y, yaw, ox, oy):
     # transform obstacles to base link frame
     rot = Rot.from_euler('z', yaw).as_matrix()[0:2, 0:2]
-    distance = 0.0
+    barrier = 0.0
     for iox, ioy in zip(ox, oy):
         tx = iox - x
         ty = ioy - y
         converted_xy = np.stack([tx, ty]).T @ rot
-        rx, ry = converted_xy[0], converted_xy[1]
-        # same dist_to_obst, increase sharp -> less penalty
+        rx, ry = abs(converted_xy[0]), abs(converted_xy[1])
+        # for same dist_to_obst, increase sharp -> less penalty
         sharp = 3
-        distance += np.exp(-sharp*np.max((np.abs(rx - LF), np.abs(ry - W/2.0))))
 
-    return distance
+        dist = np.max((np.max((rx - LF, 0)), np.max((ry - W/2.0, 0))))
+
+        barrier += np.exp(-sharp*dist)
+
+    return barrier
 
 def inter_veh_gap_vect(ego, others):
     """
@@ -795,8 +802,7 @@ def veh_ped_gap(ego, ped):
                  ) - (w + wi)
         min_dist = min(dist, min_dist)
 
-    return np.exp(-2*max(0, min_dist)), min_dist < DYNAMIC_SAFE_NET
-
+    return np.exp(-2*max(0, min_dist)), min_dist < DYNAMIC_SAFE_NET_PED
 
 def veh_ped_gap_vect(ego, peds):
     """
@@ -830,10 +836,19 @@ def veh_ped_gap_vect(ego, peds):
 
     # Compute cost and collision flags
     cost = np.exp(-2 * np.maximum(0, min_dist))
-    collisions = min_dist < DYNAMIC_SAFE_NET  # Boolean array (N,)
+    collisions = min_dist < DYNAMIC_SAFE_NET_PED  # Boolean array (N,)
 
     return cost, collisions
 
+def drawCar(Car_obj, x, y, yaw):
+    car = np.array([[-Car_obj.length/2, -Car_obj.length/2, Car_obj.length/2, Car_obj.length/2, -Car_obj.length/2],
+                    [Car_obj.width / 2, -Car_obj.width / 2, -Car_obj.width / 2, Car_obj.width / 2, Car_obj.width / 2]])
+
+    rotationZ = np.array([[math.cos(yaw), -math.sin(yaw)],
+                     [math.sin(yaw), math.cos(yaw)]])
+    car = np.dot(rotationZ, car)
+    car += np.array([[x], [y]])
+    return car
 
 def evaluate_path(path_n, ox, oy, dynamic_veh_path, ped_path):
 
@@ -866,13 +881,15 @@ def evaluate_path(path_n, ox, oy, dynamic_veh_path, ped_path):
     tox, toy = ox[:], oy[:]
     obstacle_kd_tree = cKDTree(np.vstack((tox, toy)).T)
     ego_kd_tree= cKDTree(path_n[:, :2])
-    spars_dist_obst = ego_kd_tree.sparse_distance_matrix(obstacle_kd_tree, max_distance=W_BUBBLE_R).toarray() # path length x number of obstacle points
-    time_step, obst_ind = np.nonzero(spars_dist_obst)
+    spars_dist_obst = ego_kd_tree.sparse_distance_matrix(obstacle_kd_tree, max_distance=W_BUBBLE_R, p=np.inf).toarray() # path length x number of obstacle points
+    # time_step, obst_ind = np.nonzero(spars_dist_obst)
 
     ## Static obstacles
     sum_dist_obst = 0.0
+    no_obst = 0
     for i in range(spars_dist_obst.shape[0]):
         obst_ind,  = np.nonzero(spars_dist_obst[i])
+        no_obst += len(obst_ind)
         if len(obst_ind)>0:
             ox_i = [ox[i] for i in obst_ind]
             oy_i = [oy[i] for i in obst_ind]
@@ -880,7 +897,21 @@ def evaluate_path(path_n, ox, oy, dynamic_veh_path, ped_path):
             y = path_n[i, 1]
             yaw = path_n[i, 2]
 
+            # if path_n.shape[0] == 37:
+            #     car_i = drawCar(Car_obj, path_n[i, 0], path_n[i, 1], path_n[i, 2])
+            #     axes[0, 1].plot(car_i[0, :], car_i[1, :], color='brown', linewidth=2, alpha=1)
+            #     axes[0, 1].plot([ox[i] for i in obst_ind], [oy[i] for i in obst_ind], color='red',
+            #                                  linestyle='', marker='o')
+            # elif path_n.shape[0] == 43:
+            #     car_i = drawCar(Car_obj, path_n[i, 0], path_n[i, 1], path_n[i, 2])
+            #     axes[1, 1].plot(car_i[0, :], car_i[1, :], color='brown', linewidth=2, alpha=1)
+            #     axes[1, 1].plot([ox[i] for i in obst_ind], [oy[i] for i in obst_ind], color='red',
+            #                                  linestyle='', marker='o')
+
             sum_dist_obst += dist_to_obst(x, y, yaw, ox_i, oy_i)
+
+    # print("No. of obstacles: ",  no_obst)
+    # print("sum_dist_obst: ", sum_dist_obst)
 
     ## extrapolate the predictions
     # for i in range(len(dynamic_veh_path)):
@@ -923,7 +954,7 @@ def evaluate_path(path_n, ox, oy, dynamic_veh_path, ped_path):
                 #         sum_dynamic_obst += dist_current
 
             ## dynamic ped
-            ped_inds, = np.where([np.linalg.norm(ped_path[j][i][:2] - path_n_curr[i, :2]) < W_BUBBLE_R for j in range(len(ped_path))])
+            ped_inds, = np.where([np.linalg.norm(ped_path[j][i][:2] - path_n_curr[i, :2]) < 2*W_BUBBLE_R for j in range(len(ped_path))])
             if len(ped_inds) > 0:
                 dynamic_veh_path_close = np.array([ped_path[ped_i][i] for ped_i in ped_inds])
                 distances, collisions = veh_ped_gap_vect(path_n_curr[i], dynamic_veh_path_close)
@@ -945,8 +976,12 @@ def evaluate_path(path_n, ox, oy, dynamic_veh_path, ped_path):
         if not collision:
             break
 
-    cost = (0.0*len(path_n) + curr_wait_time + 0.0*sum_dist_obst + 0.0*sum_dynamic_obst + 0.0*sum_ped +
-            0.0*np.sum(np.linalg.norm(acc, axis=1)/A_MAX) + 1.0*BACK_COST*len(reverse_indices) + 0.0*SB_COST*len(switchback_indices) + STEER_COST*(np.sum(cosine_dist)/2))
+    cost_smooth = (1.0 * np.sum(np.linalg.norm(acc, axis=1) / A_MAX) + 1.0 * BACK_COST * len(reverse_indices) +
+                   1.0 * SB_COST * len(switchback_indices) + 1.0 * COS_COST * (np.sum(cosine_dist) / 2))
+    cost_time = 0.1*len(path_n) + curr_wait_time
+    cost_obst = 1.0*sum_dist_obst + 1.0*sum_dynamic_obst + 1.0*sum_ped
+
+    cost = cost_obst + 1.0*cost_time + 1.0*cost_smooth
 
     return cost, collision, curr_wait_time
 
@@ -1083,7 +1118,7 @@ if __name__ == '__main__':
     # ped_vel = [0.5*np.array([0.4, 0.1])]
     ## straight veh
     ped_0 = [np.array([x_min + 2*l_w + 2 * p_l, y_min + 1 * l_w + 1*p_w])]
-    ped_vel = [np.array([0.0, 0.2])]
+    ped_vel = [np.array([0.0, 0.3])]
     ped_path = [np.array([ped_0[j] + i*ped_vel[j] for i in range(length_preds)]) for j in range(len(ped_0))]
 
     fig, axes = plt.subplots(2, 2, figsize=(10, 8))
@@ -1096,31 +1131,31 @@ if __name__ == '__main__':
             axes[i, j].set_xlim(x_min-1, x_max + 1)
             axes[i, j].set_ylim(y_min-1, y_max + 1)
             plot_car(i_x, i_y, i_yaw, axes[i, j])
-            # time_dynamic=0
-            # # plot other cars
-            # for veh_i in range(len(dynamic_veh_path)):
-            #     p_yaw = dynamic_veh_path[veh_i][time_dynamic, 2]
-            #     p_x = dynamic_veh_path[veh_i][time_dynamic, 0]
-            #     p_y = dynamic_veh_path[veh_i][time_dynamic, 1]
-            #     plot_other_car(p_x, p_y, p_yaw, axes[i, j])
-            # # plot pedestrians
-            # for ped_i in range(len(ped_path)):
-            #     circle = Circle((ped_path[ped_i][time_dynamic, 0], ped_path[ped_i][time_dynamic, 1]), radius=PED_RAD, facecolor='red')
-            #     axes[i, j].add_artist(circle)
+            time_dynamic=0
+            # plot other cars
+            for veh_i in range(len(dynamic_veh_path)):
+                p_yaw = dynamic_veh_path[veh_i][time_dynamic, 2]
+                p_x = dynamic_veh_path[veh_i][time_dynamic, 0]
+                p_y = dynamic_veh_path[veh_i][time_dynamic, 1]
+                plot_other_car(p_x, p_y, p_yaw, axes[i, j])
+            # plot pedestrians
+            for ped_i in range(len(ped_path)):
+                circle = Circle((ped_path[ped_i][time_dynamic, 0], ped_path[ped_i][time_dynamic, 1]), radius=PED_RAD, facecolor='red')
+                axes[i, j].add_artist(circle)
 
-    # for i in range(axes.shape[0]):
-    #     for j in range(axes.shape[1]):
-    #         for time_dynamic in range(dynamic_veh_path[0].shape[0]):
-    #             # plot other cars
-    #             for veh_i in range(len(dynamic_veh_path)):
-    #                 p_yaw = dynamic_veh_path[veh_i][time_dynamic, 2]
-    #                 p_x = dynamic_veh_path[veh_i][time_dynamic,0]
-    #                 p_y = dynamic_veh_path[veh_i][time_dynamic,1]
-    #                 plot_other_car_trans(p_x, p_y, p_yaw, axes[i, j])
-    #             # plot pedestrians
-    #             for ped_i in range(len(ped_path)):
-    #                 circle = Circle((ped_path[ped_i][time_dynamic, 0], ped_path[ped_i][time_dynamic, 1]), radius=PED_RAD, facecolor='red', alpha=0.1)
-    #                 axes[i, j].add_artist(circle)
+    for i in range(axes.shape[0]):
+        for j in range(axes.shape[1]):
+            for time_dynamic in range(dynamic_veh_path[0].shape[0]):
+                # plot other cars
+                for veh_i in range(len(dynamic_veh_path)):
+                    p_yaw = dynamic_veh_path[veh_i][time_dynamic, 2]
+                    p_x = dynamic_veh_path[veh_i][time_dynamic,0]
+                    p_y = dynamic_veh_path[veh_i][time_dynamic,1]
+                    plot_other_car_trans(p_x, p_y, p_yaw, axes[i, j])
+                # plot pedestrians
+                for ped_i in range(len(ped_path)):
+                    circle = Circle((ped_path[ped_i][time_dynamic, 0], ped_path[ped_i][time_dynamic, 1]), radius=PED_RAD, facecolor='red', alpha=0.1)
+                    axes[i, j].add_artist(circle)
 
     start_t_c = time.time()
     costs = []
@@ -1169,7 +1204,7 @@ if __name__ == '__main__':
         axes[i // 2, i % 2].plot(x, y, color=colors[i], label=label_i)
         for j in range(len(x)):
             plot_car_trans(x[j], y[j], yaw[j], axes[i // 2, i % 2])
-        axes[i // 2, i % 2].legend(fontsize=20)
+        axes[i // 2, i % 2].legend(loc='upper center', fontsize=20)
 
     # ax.grid(True)
     # start_t_r = time.time()
