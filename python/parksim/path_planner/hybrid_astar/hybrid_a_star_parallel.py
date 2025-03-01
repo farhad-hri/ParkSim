@@ -1000,54 +1000,6 @@ def parallel_ray(start, ox, oy, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION, g_list)
     results = ray.get(futures)
     return results
 
-type='lot'
-
-home_path = os.path.abspath(os.getcwd())
-
-## Load the configuration files
-config_path = home_path + '/Config/'
-
-with open(config_path + 'config_planner.json') as f:
-    config_planner = json.load(f)
-
-with open(config_path + 'config_map.json') as f:
-    config_map = json.load(f)
-
-Car_obj = Car_class(config_planner)
-x_min, x_max, y_min, y_max, p_w, p_l, l_w, n_r, n_s, n_s1, obstacleX, obstacleY, s = map_lot(type, config_map, Car_obj)
-
-ox = obstacleX
-oy = obstacleY
-
-# Set Initial parameters
-# start = [-5.0, 4.35, 0]
-wb_2 = Car_obj.wheelBase/2
-start = [s[0] + wb_2*np.cos(s[2]),  s[1] + wb_2*np.sin(s[2]), s[2]] # transforming to center of vehicle
-# goal = [0.0, 0.0, np.deg2rad(-90.0)]
-# goal = [0, 0, np.deg2rad(-90.0)]
-# goal = [0, 0, np.deg2rad(90)]
-park_spots = [5, 9]
-# park_spots_xy: list of centers of park_spots [x, y, 1 if left to center line and 0 if right to center line]
-park_spots_xy = [np.array([x_min + (1 + (i // n_s)) * l_w + (i // n_s1) * p_l + p_l / 2,
-                           y_min + l_w + (i % n_s1) * p_w + p_w / 2, bool(i % n_s <= n_s1 - 1)])
-                 for i in park_spots]
-goal_park_spots = []  # park_spot i ->  goal yaw = 0.0 if 0, and np.pi if 1 -> (x, y, yaw) of goal
-for spot_xy in park_spots_xy:
-    # transforming center of parking spot to rear axle of vehicle (goal x, y) with appropriate goal yaw
-    goal1 = np.array([spot_xy[0] - Car_obj.length / 2 + Car_obj.axleToBack, spot_xy[1], 0.0])
-    goal2 = np.array([spot_xy[0] + Car_obj.length / 2 - Car_obj.axleToBack, spot_xy[1], np.pi])
-    goal_spot_xy = [goal1, goal2]
-    goal_plot = goal1
-    goal_park_spots.append(goal_spot_xy)
-
-goal_park_spots = list(chain.from_iterable(goal_park_spots))
-# transforming to center of vehicle
-g_list = [[g[0] + wb_2*np.cos(g[2]),  g[1] + wb_2*np.sin(g[2]), g[2]] for g in goal_park_spots]
-# g_list = g_list[1:]
-# g_list[0] = [start[0],  start[1] + 15.0, start[2]] # explore (go straight)
-# for _ in range(5):
-#     g_list = g_list + g_list
-
 def with_multiprocessing(start, ox, oy, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION):
     print("Starting function with multiprocessing.")
     jobs = []
@@ -1072,6 +1024,56 @@ def with_multiprocessing(start, ox, oy, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION)
     # return results
 
 if __name__ == '__main__':
+
+    type = 'lot'
+
+    home_path = os.path.abspath(os.getcwd())
+
+    ## Load the configuration files
+    config_path = home_path + '/Config/'
+
+    with open(config_path + 'config_planner.json') as f:
+        config_planner = json.load(f)
+
+    with open(config_path + 'config_map.json') as f:
+        config_map = json.load(f)
+
+    Car_obj = Car_class(config_planner)
+    x_min, x_max, y_min, y_max, p_w, p_l, l_w, n_r, n_s, n_s1, obstacleX, obstacleY, s = map_lot(type, config_map,
+                                                                                                 Car_obj)
+
+    ox = obstacleX
+    oy = obstacleY
+
+    # Set Initial parameters
+    # start = [-5.0, 4.35, 0]
+    wb_2 = Car_obj.wheelBase / 2
+    start = [s[0] + wb_2 * np.cos(s[2]), s[1] + wb_2 * np.sin(s[2]), s[2]]  # transforming to center of vehicle
+    # goal = [0.0, 0.0, np.deg2rad(-90.0)]
+    # goal = [0, 0, np.deg2rad(-90.0)]
+    # goal = [0, 0, np.deg2rad(90)]
+    park_spots = [5, 9]
+    # park_spots_xy: list of centers of park_spots [x, y, 1 if left to center line and 0 if right to center line]
+    park_spots_xy = [np.array([x_min + (1 + (i // n_s)) * l_w + (i // n_s1) * p_l + p_l / 2,
+                               y_min + l_w + (i % n_s1) * p_w + p_w / 2, bool(i % n_s <= n_s1 - 1)])
+                     for i in park_spots]
+    goal_park_spots = []  # park_spot i ->  goal yaw = 0.0 if 0, and np.pi if 1 -> (x, y, yaw) of goal
+    for spot_xy in park_spots_xy:
+        # transforming center of parking spot to rear axle of vehicle (goal x, y) with appropriate goal yaw
+        goal1 = np.array([spot_xy[0] - Car_obj.length / 2 + Car_obj.axleToBack, spot_xy[1], 0.0])
+        goal2 = np.array([spot_xy[0] + Car_obj.length / 2 - Car_obj.axleToBack, spot_xy[1], np.pi])
+        goal_spot_xy = [goal1, goal2]
+        goal_plot = goal1
+        goal_park_spots.append(goal_spot_xy)
+
+    goal_park_spots = list(chain.from_iterable(goal_park_spots))
+    # transforming to center of vehicle
+    g_list = [[g[0] + wb_2 * np.cos(g[2]), g[1] + wb_2 * np.sin(g[2]), g[2]] for g in goal_park_spots]
+    # g_list = g_list[1:]
+    # g_list[0] = [start[0],  start[1] + 15.0, start[2]] # explore (go straight)
+    # for _ in range(5):
+    #     g_list = g_list + g_list
+
     print("Start Hybrid A* planning")
     print("start : ", start)
 
@@ -1169,9 +1171,9 @@ if __name__ == '__main__':
     # costs = parallel_cost(path_list, ox, oy)
     print("Comp time cost (parallelized): ", time.time() - start_t_c)
 
-    start_t_m = time.time()
-    with_multiprocessing(start, ox, oy, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION)
-    print("Comp time (multiprocess): ", time.time() - start_t_m)
+    # start_t_m = time.time()
+    # with_multiprocessing(start, ox, oy, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION)
+    # print("Comp time (multiprocess): ", time.time() - start_t_m)
 
     start_t = time.time()
     for goal in g_list:
