@@ -1,9 +1,11 @@
 import numpy as np
+import pylab as pl
 from scipy.stats import norm
 import os
 import json
 from itertools import chain
 import matplotlib.pyplot as plt
+from scipy.spatial import distance
 
 from parksim.path_planner.hybrid_astar.hybrid_a_star_parallel import map_lot, Car_class, hybrid_a_star_planning, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION
 from parksim.path_planner.hybrid_astar.car import plot_car, plot_other_car
@@ -37,7 +39,10 @@ def mahalanobis_distance(mu, Sigma, park_spot, Car_obj):
     # Find minimum Mahalanobis distance to any boundary
     # d_min = min(abs(d_x_min), abs(d_x_max), abs(d_y_min), abs(d_y_max))
 
-    prob = (norm.cdf(d_x_max) - norm.cdf(d_x_min))*(norm.cdf(d_y_max) - norm.cdf(d_y_min))
+    d_min = distance.mahalanobis(park_spot[:2], mu[:2], Sigma)
+
+    prob = np.exp(-0.1*d_min)
+    # prob = (norm.cdf(d_x_max) - norm.cdf(d_x_min))*(norm.cdf(d_y_max) - norm.cdf(d_y_min))
 
     return prob
 
@@ -91,7 +96,11 @@ def occupancy_probability_multiple_spots(T, dynamic_veh_path, Sigma_0, Q, park_s
         # Compute probability of being inside parking spot for each vehicle and each spot
         prob_t = np.array([[mahalanobis_distance(mu_t[i], Sigma_t[i], park_spots_xy[j], Car_obj) for i in range(n_vehicles)] for j in range(n_spots)])
 
-        P_O[t] = 1 - np.prod(1 - prob_t, axis=1) # Probability that at least one vehicle occupies each spot
+        prob_t_new = 1 - np.prod(1 - prob_t, axis=1)  # Probability that at least one vehicle occupies each spot using only dynamic obstacles
+        alpha = 0.95 # filter
+        P_O[t] = alpha * P_O[t - 1] + prob_t_new * (1 - P_O[t - 1])  # At least one vehicle per spot
+        P_O[t] = prob_t_new
+
         # P_O[t] = prob_t1
         # P_enter_t = norm.cdf(d_t)  # Probability vehicle i enters spot j
         #
@@ -151,7 +160,7 @@ goal_park_spots = list(chain.from_iterable(goal_park_spots))
 g_list = [[g[0] + wb_2 * np.cos(g[2]), g[1] + wb_2 * np.sin(g[2]), g[2]] for g in goal_park_spots]
 
 dynamic_veh_0 = np.array([np.array([x_min + l_w + 2 * p_l + l_w / 4, y_min + l_w + n_s1 * p_w, np.deg2rad(-90.0)])])
-Sigma_0 = np.array([[[1*Car_obj.length, 0], [0, 1*Car_obj.width]]])  # Covariance for each vehicle
+Sigma_0 = np.array([[[0.5*Car_obj.length, 0], [0, 0.5*Car_obj.width]]])  # Covariance for each vehicle
 dynamic_veh_vel = np.array([np.array([0.0, -0.5, 0.0])])
 dynamic_veh_parking = [1]
 length_preds = T+1
@@ -159,7 +168,7 @@ dynamic_veh_path = []
 for veh_i, veh_parking in enumerate(dynamic_veh_parking):
     if veh_parking:
         ## dynamic_veh to spot
-        path_veh = hybrid_a_star_planning(dynamic_veh_0[0], g_list[1], ox, oy, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION)
+        path_veh = hybrid_a_star_planning(dynamic_veh_0[0], g_list[2], ox, oy, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION)
         extra_time_steps = int(length_preds - len(path_veh.x_list))
         path_veh_n = np.array([path_veh.x_list, path_veh.y_list, path_veh.yaw_list]).T
         last_state = path_veh_n[-1]
@@ -175,10 +184,10 @@ for veh_i, veh_parking in enumerate(dynamic_veh_parking):
     dynamic_veh_path.append(path_veh_n)
 
 dynamic_veh_path=np.array(dynamic_veh_path)
-skip = 3
+skip = 5
 T = int(T/skip)
 dynamic_veh_path = dynamic_veh_path[:, 0:dynamic_veh_path.shape[1]:skip , :]
-Q = np.array([[0.2, 0], [0, 0.2]])  # Process noise (uncertainty growth)
+Q = np.array([[0.5, 0], [0, 0.5]])  # Process noise (uncertainty growth)
 
 fig, ax = plt.subplots(figsize=(10, 8))
 ## Init plot
@@ -225,9 +234,19 @@ for veh_i in range(len(dynamic_veh_path)):
 # Compute occupancy probabilities for multiple vehicles and spots
 P_O = occupancy_probability_multiple_spots(T, dynamic_veh_path, Sigma_0, Q, park_spots_xy, Car_obj)
 
+fig_p, ax_p = pl.subplots()
+for i in range(P_O.shape[1]):
+    label_i = 'Spot' + str(i+1)
+    ax_p.plot(skip*np.arange(P_O.shape[0]), P_O[:, i], marker='o', markersize=12, label=label_i)
+    ax_p.tick_params(axis='both', which='major', labelsize=20)
+    ax_p.set_xlabel("Time (s)", fontsize=20)
+    ax_p.set_ylabel("Occupancy Probability", fontsize=20)
+
+ax_p.legend(fontsize=24)
+
 # Print results
 for t in range(T + 1):
-    print(f"Time {t}:")
+    print(f"Time {int(t*skip)}:")
     for j in range(n_spots):
         print(f"  Spot {j + 1}: P(O_t) = {P_O[t, j]:.3f}")
 

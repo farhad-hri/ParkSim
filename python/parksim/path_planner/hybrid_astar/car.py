@@ -124,7 +124,7 @@ def plot_other_car(x, y, yaw, ax):
     arrow_x, arrow_y, arrow_yaw = x, y, yaw
     plot_arrow(arrow_x, arrow_y, arrow_yaw, ax)
 
-    ax.plot(car_outline_x, car_outline_y, car_color)
+    ax.plot(car_outline_x, car_outline_y, car_color, alpha=0.5)
 
 def plot_other_car_trans(x, y, yaw, ax):
     car_color = '-r'
