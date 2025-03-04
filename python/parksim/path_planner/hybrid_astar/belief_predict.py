@@ -159,16 +159,25 @@ goal_park_spots = list(chain.from_iterable(goal_park_spots))
 # transforming to center of vehicle
 g_list = [[g[0] + wb_2 * np.cos(g[2]), g[1] + wb_2 * np.sin(g[2]), g[2]] for g in goal_park_spots]
 
-dynamic_veh_0 = np.array([np.array([x_min + l_w + 2 * p_l + l_w / 4, y_min + l_w + n_s1 * p_w, np.deg2rad(-90.0)])])
+dynamic_veh_0 = np.array([np.array([x_min + l_w + 2 * p_l + 3*l_w / 4, y_min + l_w + n_s1 * p_w, np.deg2rad(90.0)])])
+# dynamic_veh_0 = np.array([np.array([x_min + l_w + 2 * p_l + l_w / 4, y_min + l_w + n_s1 * p_w, np.deg2rad(-90.0)])])
 Sigma_0 = np.array([[[0.5*Car_obj.length, 0], [0, 0.5*Car_obj.width]]])  # Covariance for each vehicle
 dynamic_veh_vel = np.array([np.array([0.0, -0.5, 0.0])])
-dynamic_veh_parking = [1]
+dynamic_veh_parking = [2] # 1 is parking in, 2 is getting out, 0 is cruising
 length_preds = T+1
 dynamic_veh_path = []
 for veh_i, veh_parking in enumerate(dynamic_veh_parking):
-    if veh_parking:
+    if veh_parking==1:
         ## dynamic_veh to spot
         path_veh = hybrid_a_star_planning(dynamic_veh_0[0], g_list[2], ox, oy, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION)
+        extra_time_steps = int(length_preds - len(path_veh.x_list))
+        path_veh_n = np.array([path_veh.x_list, path_veh.y_list, path_veh.yaw_list]).T
+        last_state = path_veh_n[-1]
+        repeat_veh = np.repeat(last_state.reshape((1, -1)), repeats=extra_time_steps, axis=0)
+        path_veh_n = np.vstack((path_veh_n, repeat_veh))
+    elif veh_parking==2:
+        ## dynamic_veh out of spot
+        path_veh = hybrid_a_star_planning(g_list[3], dynamic_veh_0[0], ox, oy, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION)
         extra_time_steps = int(length_preds - len(path_veh.x_list))
         path_veh_n = np.array([path_veh.x_list, path_veh.y_list, path_veh.yaw_list]).T
         last_state = path_veh_n[-1]
