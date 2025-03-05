@@ -168,7 +168,7 @@ def occupancy_probability_multiple_spots(T, dynamic_veh_path, Sigma_0, Q, park_s
         # Convert to cosine distance (1 - cosine similarity)
         cosine_distance = 1 - cosine_similarity # (n_spots, n_vehicles)
         cosine_distance[spot_ind, veh_ind] = 0.0
-        dot_prod[spot_ind, veh_ind] = 0.0
+        dot_prod[spot_ind, veh_ind] = 100000.0
 
         cos_theta = np.cos(yaw_t)
         sin_theta = np.sin(yaw_t)
@@ -202,11 +202,11 @@ def occupancy_probability_multiple_spots(T, dynamic_veh_path, Sigma_0, Q, park_s
         # P_O[t] = alpha * P_O[t - 1] + (1 - alpha) * (
         #             1 - np.prod(1 - P_enter_t, axis=0))  # At least one vehicle per spot
 
-    P_O_result[:, 0] =  P_O_d[:, 0]
-    P_O_result[:, 1] = P_O[:, 1]
-
     # P_O_result[:, 0] =  P_O[:, 0]
-    # P_O_result[:, 1] = P_O[:, 1]
+    # P_O_result[:, 1] = P_O_d[:, 1]
+
+    P_O_result[:, 0] =  P_O[:, 0]
+    P_O_result[:, 1] = P_O[:, 1]
     return P_O_result
 
 type='lot'
@@ -260,7 +260,7 @@ g_list = [[g[0] + wb_2 * np.cos(g[2]), g[1] + wb_2 * np.sin(g[2]), g[2]] for g i
 n_vehicles = 1
 # np.array([x_min + l_w + 2 * p_l + 3*l_w / 4, y_min + l_w + n_s1 * p_w, np.deg2rad(90.0)]) # right lane outside parking row
 # np.array([x_min + 1*l_w + 2 * p_l + 1*l_w / 4, y_min + l_w + (n_s1-1) * p_w, np.deg2rad(-90.0)]) # left lane outside parking row
-dynamic_veh_0 = np.array([np.array([x_min + l_w + 2 * p_l + 3*l_w / 4, y_min + l_w + n_s1 * p_w, np.deg2rad(90.0)])
+dynamic_veh_0 = np.array([np.array([x_min + 1*l_w + 2 * p_l + 1*l_w / 4, y_min + l_w + (n_s1-1) * p_w, np.deg2rad(-90.0)])
                           ])
 dynamic_veh_0 = dynamic_veh_0[:n_vehicles]
 # dynamic_veh_0 = np.array([np.array([x_min + l_w + 2 * p_l + l_w / 4, y_min + l_w + n_s1 * p_w, np.deg2rad(-90.0)])]) # parking in
@@ -272,7 +272,7 @@ dynamic_veh_vel = np.array([np.array([0.0, -0.5, 0.0]),
                             np.array([-0.01, 0.0, 0.0]),
                             np.array([0.0, -0.001, 0.0])])
 dynamic_veh_vel = dynamic_veh_vel[:n_vehicles]
-dynamic_veh_parking = [2, 0, 0] # 1 is parking in, 2 is getting out, 0 is cruising
+dynamic_veh_parking = [0, 0, 0] # 1 is parking in, 2 is getting out, 0 is cruising
 dynamic_veh_parking = dynamic_veh_parking[:n_vehicles]
 length_preds = T+1
 dynamic_veh_path = []
@@ -292,7 +292,7 @@ for veh_i, veh_parking in enumerate(dynamic_veh_parking):
 
     elif veh_parking==2:
         ## dynamic_veh out of spot
-        path_veh = hybrid_a_star_planning(g_list[0], dynamic_veh_0[0], ox, oy, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION)
+        path_veh = hybrid_a_star_planning(g_list[3], dynamic_veh_0[0], ox, oy, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION)
         if length_preds > len(path_veh.x_list):
             extra_time_steps = int(length_preds - len(path_veh.x_list))
             path_veh_n = np.array([path_veh.x_list, path_veh.y_list, path_veh.yaw_list]).T
