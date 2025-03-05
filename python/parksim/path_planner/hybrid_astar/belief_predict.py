@@ -6,8 +6,9 @@ import json
 from itertools import chain
 import matplotlib.pyplot as plt
 from scipy.spatial import distance
+import time
 
-from parksim.path_planner.hybrid_astar.hybrid_a_star_parallel import map_lot, Car_class, hybrid_a_star_planning, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION
+from parksim.path_planner.hybrid_astar.hybrid_a_star_parallel import map_lot, Car_class, hybrid_a_star_planning, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION, MOTION_RESOLUTION
 from parksim.path_planner.hybrid_astar.car import plot_car, plot_other_car
 
 def mahalanobis_distance(mu, Sigma, park_spot, Car_obj):
@@ -46,16 +47,74 @@ def mahalanobis_distance(mu, Sigma, park_spot, Car_obj):
 
     return prob
 
+## Investigate errors after computing Sigma_t
+def occ_vec(T, dynamic_veh_path, Sigma_0, Q, park_spots_xy, Car_obj):
+    n_spots = park_spots_xy.shape[0]
+    n_vehicles = dynamic_veh_path.shape[0]
+    P_O = np.zeros((T + 1, n_spots))
+    P_O_d = np.zeros((T + 1, n_spots))
+    P_O_result = np.zeros((T + 1, n_spots))
+
+    yaw_t = dynamic_veh_path[:, :, 2]
+    cos_theta = np.cos(yaw_t)
+    sin_theta = np.sin(yaw_t)
+    rotation_matrices = np.stack([
+        np.stack([cos_theta, -sin_theta], axis=-1),
+        np.stack([sin_theta, cos_theta], axis=-1)
+    ], axis=-2)
+
+    Sigma_t = np.einsum('ntij,njk,ntkl->ntil', rotation_matrices, Sigma_0 + Q, rotation_matrices)
+    prob_0 = np.array([[mahalanobis_distance(dynamic_veh_path[i, 0], Sigma_t[i], park_spots_xy[j], Car_obj)
+                        for i in range(n_vehicles)] for j in range(n_spots)])
+    P_O[0] = 1 - np.prod(1 - prob_0, axis=1)
+    P_O_d[0] = P_O[0]
+
+    mu_t = dynamic_veh_path[:, :, :2]
+    dynamic_veh_vel = np.diff(mu_t, axis=1) / MOTION_RESOLUTION
+    vel_t = np.pad(dynamic_veh_vel, ((0, 0), (1, 0), (0, 0)), mode='edge')
+
+    vectors_to_spots = park_spots_xy[:, np.newaxis, np.newaxis, :2] - mu_t[np.newaxis, :, :, :2]
+    vel_norm = np.linalg.norm(vel_t, axis=2, keepdims=True)
+    vectors_norm = np.linalg.norm(vectors_to_spots, axis=3, keepdims=True)
+    epsilon = 1e-6
+    vel_norm = np.maximum(vel_norm, epsilon)
+    vectors_norm = np.maximum(vectors_norm, epsilon)
+
+    vel_normalized = vel_t / vel_norm
+    vectors_normalized = vectors_to_spots / vectors_norm
+    cosine_similarity = np.einsum('tij,mtij->mti', vel_normalized, vectors_normalized)
+    cosine_distance = 1 - cosine_similarity
+    zero_spot_veh = (vel_norm[..., 0] <= epsilon) | (vectors_norm[..., 0] <= epsilon)
+    cosine_distance[zero_spot_veh] = 0.0
+
+    rho = 0.8
+    Sigma_vel_t = (2 * Sigma_t + Q - 2 * np.array([[rho, 0.0], [0.0, rho]])) / MOTION_RESOLUTION ** 2
+    veh_vel_uncertainty = np.trace(Sigma_vel_t, axis1=2, axis2=3)
+
+    prob_t_dist = np.array([[mahalanobis_distance(mu_t[i, t], Sigma_t[i], park_spots_xy[j], Car_obj)
+                             for i in range(n_vehicles)] for j in range(n_spots) for t in range(T + 1)]).reshape(T + 1,
+                                                                                                                 n_spots,
+                                                                                                                 n_vehicles)
+    prob_t = prob_t_dist * np.exp(-0.1 * cosine_distance / veh_vel_uncertainty[np.newaxis, :, :])
+    prob_t_new = 1 - np.prod(1 - prob_t, axis=2)
+
+    alpha = 0.95
+    P_O[1:] = alpha * P_O[:-1] + prob_t_new[1:] * (1 - P_O[:-1])
+    P_O_d[1:] = 1 - (alpha * (1 - P_O_d[:-1]) + (1 - prob_t_new[1:]) * P_O_d[:-1])
+    P_O_result[:, :2] = P_O_d[:, :2]
+
+    return P_O_result
+
 def occupancy_probability_multiple_spots(T, dynamic_veh_path, Sigma_0, Q, park_spots_xy, Car_obj):
     """
     Computes the recursive occupancy probability P(O_t) for multiple vehicles and multiple parking spots.
 
     Parameters:
     - T: Total number of time steps
-    - dynamic_veh_path: path of dynamic vehicle's mean (n_vehicles x 3 array)
+    - dynamic_veh_path: path of dynamic vehicle's mean (n_vehicles x length of path x 3 array)
     - Sigma_0: Initial covariance matrix of the vehicles' positions (n_vehicles x 2 x 2 array)
     - Q: Process noise covariance matrix (2 x 2)
-    - park_spots_xy: List of centers(x, y) of parking spots and whether parking spot is left (1) or right (0) to center lane  (n_spots x 3)
+    - park_spots_xy: Array of centers(x, y) of parking spots and whether parking spot is left (1) or right (0) to center lane  (n_spots x 3)
     - Car_obj: object of Car_class that stores the dimensions of car
 
     Returns:
@@ -64,6 +123,8 @@ def occupancy_probability_multiple_spots(T, dynamic_veh_path, Sigma_0, Q, park_s
     n_spots = park_spots_xy.shape[0]
     n_vehicles = dynamic_veh_path.shape[0]
     P_O = np.zeros((T + 1, n_spots))  # Occupancy probability for each time step and parking spot
+    P_O_d = np.zeros((T + 1, n_spots))  # Occupancy probability for each time step and parking spot, focussed on departing vehicles
+    P_O_result = np.zeros((T + 1, n_spots))  # Occupancy probability for each time step and parking spot, focussed on departing vehicles
 
     # Initialize with multiple vehicles' initial probability of occupying the spots
     yaw_t = dynamic_veh_path[:, 0, 2]
@@ -76,15 +137,39 @@ def occupancy_probability_multiple_spots(T, dynamic_veh_path, Sigma_0, Q, park_s
     Sigma_t = np.array([rotation_matrices[i] @ (Sigma_0[i] + Q) @ rotation_matrices[i].T  for i in range(Sigma_0.shape[0])])  # Update covariances
     prob_0 = np.array([[mahalanobis_distance(dynamic_veh_path[i, 0], Sigma_t[i], park_spots_xy[j], Car_obj) for i in range(n_vehicles)] for j in range(n_spots)])
     P_O[0] = 1 - np.prod(1 - prob_0, axis=1)  # Probability that at least one vehicle occupies each spot
-
+    P_O_d[0] = 1 - np.prod(1 - prob_0, axis=1)
     mu_t = dynamic_veh_path[:, 0]
     Sigma_t = Sigma_0
+
+    dynamic_veh_vel = np.diff(dynamic_veh_path[:, :, :2], axis=1) / MOTION_RESOLUTION
 
     # Iterate through time steps t = 1 to T
     for t in range(1, T + 1):
         # Propagate mean and covariance for each vehicle
         mu_t = dynamic_veh_path[:, t, :2]  # Update positions (vectorized)
         yaw_t = dynamic_veh_path[:, t, 2]
+
+        vel_t = dynamic_veh_vel[:, min(t, T-1), :2] # n_vehicles x 2
+        vectors_to_spots = park_spots_xy[:, np.newaxis, :2] - mu_t[np.newaxis, :, :2] # n_spots x n_vehicles x 2
+        # Compute norms with thresholding
+        vel_norm = np.linalg.norm(vel_t, axis=1, keepdims=True)
+        vectors_norm = np.linalg.norm(vectors_to_spots, axis=2, keepdims=True)
+        epsilon = 1e-6
+        vel_norm = np.maximum(vel_norm, epsilon)
+        vectors_norm = np.maximum(vectors_norm, epsilon)
+        # Normalize the vectors
+        vel_normalized = vel_t / vel_norm
+        vectors_normalized = vectors_to_spots / vectors_norm
+        # Compute cosine similarity
+        dot_prod = np.einsum('ij,mij->mi', vel_t, vectors_to_spots)
+        cosine_similarity = np.einsum('ij,mij->mi', vel_normalized, vectors_normalized)
+        zero_spot_veh = np.logical_or(vel_norm[:, 0] <= epsilon, vectors_norm[:, :, 0] <= epsilon)
+        spot_ind, veh_ind = np.where(zero_spot_veh)
+        # Convert to cosine distance (1 - cosine similarity)
+        cosine_distance = 1 - cosine_similarity # (n_spots, n_vehicles)
+        cosine_distance[spot_ind, veh_ind] = 0.0
+        dot_prod[spot_ind, veh_ind] = 0.0
+
         cos_theta = np.cos(yaw_t)
         sin_theta = np.sin(yaw_t)
         rotation_matrices = np.stack([
@@ -93,13 +178,22 @@ def occupancy_probability_multiple_spots(T, dynamic_veh_path, Sigma_0, Q, park_s
         ], axis=-2)
         Sigma_t = np.array([rotation_matrices[i] @ (Sigma_t[i] + Q) @ rotation_matrices[i].T  for i in range(Sigma_t.shape[0])])  # Update covariances
 
-        # Compute probability of being inside parking spot for each vehicle and each spot
-        prob_t = np.array([[mahalanobis_distance(mu_t[i], Sigma_t[i], park_spots_xy[j], Car_obj) for i in range(n_vehicles)] for j in range(n_spots)])
+        rho = 0.0
+
+        Sigma_vel_t = (2*Sigma_t + Q - 2*np.array([[rho, 0.0],
+                                                   [0.0, rho]]))/MOTION_RESOLUTION**2
+        veh_vel_uncertainty = np.trace(Sigma_vel_t, axis1=1, axis2=2) # (n_vehicles,)
+        # Compute probability of being inside parking spot for each vehicle and each spot (n_spots x n_vehicles)
+        prob_t_dist = np.array([[mahalanobis_distance(mu_t[i], Sigma_t[i], park_spots_xy[j], Car_obj) for i in range(n_vehicles)] for j in range(n_spots)])
+        prob_t =prob_t_dist*(1/(1+np.exp(-0.001*dot_prod/veh_vel_uncertainty[np.newaxis, :])))# including velocity information
+        # prob_t = prob_t_dist
 
         prob_t_new = 1 - np.prod(1 - prob_t, axis=1)  # Probability that at least one vehicle occupies each spot using only dynamic obstacles
-        alpha = 0.95 # filter
+        alpha = 0.95 # filter: exponential distribution for departure rate, poisson for arrival rate
         P_O[t] = alpha * P_O[t - 1] + prob_t_new * (1 - P_O[t - 1])  # At least one vehicle per spot
-        P_O[t] = prob_t_new
+        # P_O[t] = prob_t_new
+
+        P_O_d[t] = 1-(alpha * (1-P_O_d[t - 1]) + (1-prob_t_new) * (P_O_d[t - 1]))
 
         # P_O[t] = prob_t1
         # P_enter_t = norm.cdf(d_t)  # Probability vehicle i enters spot j
@@ -108,7 +202,12 @@ def occupancy_probability_multiple_spots(T, dynamic_veh_path, Sigma_0, Q, park_s
         # P_O[t] = alpha * P_O[t - 1] + (1 - alpha) * (
         #             1 - np.prod(1 - P_enter_t, axis=0))  # At least one vehicle per spot
 
-    return P_O
+    P_O_result[:, 0] =  P_O_d[:, 0]
+    P_O_result[:, 1] = P_O[:, 1]
+
+    # P_O_result[:, 0] =  P_O[:, 0]
+    # P_O_result[:, 1] = P_O[:, 1]
+    return P_O_result
 
 type='lot'
 
@@ -127,8 +226,7 @@ Car_obj = Car_class(config_planner)
 x_min, x_max, y_min, y_max, p_w, p_l, l_w, n_r, n_s, n_s1, obstacleX, obstacleY, s = map_lot(type, config_map, Car_obj)
 
 # Example parameters
-T = 50  # Number of time steps
-n_vehicles = 1  # Number of vehicles
+T = 10  # Number of time steps
 n_spots = 2  # Number of parking spots
 
 ox = obstacleX
@@ -159,30 +257,51 @@ goal_park_spots = list(chain.from_iterable(goal_park_spots))
 # transforming to center of vehicle
 g_list = [[g[0] + wb_2 * np.cos(g[2]), g[1] + wb_2 * np.sin(g[2]), g[2]] for g in goal_park_spots]
 
-dynamic_veh_0 = np.array([np.array([x_min + l_w + 2 * p_l + 3*l_w / 4, y_min + l_w + n_s1 * p_w, np.deg2rad(90.0)])])
-# dynamic_veh_0 = np.array([np.array([x_min + l_w + 2 * p_l + l_w / 4, y_min + l_w + n_s1 * p_w, np.deg2rad(-90.0)])])
-Sigma_0 = np.array([[[0.5*Car_obj.length, 0], [0, 0.5*Car_obj.width]]])  # Covariance for each vehicle
-dynamic_veh_vel = np.array([np.array([0.0, -0.5, 0.0])])
-dynamic_veh_parking = [2] # 1 is parking in, 2 is getting out, 0 is cruising
+n_vehicles = 1
+# np.array([x_min + l_w + 2 * p_l + 3*l_w / 4, y_min + l_w + n_s1 * p_w, np.deg2rad(90.0)]) # right lane outside parking row
+# np.array([x_min + 1*l_w + 2 * p_l + 1*l_w / 4, y_min + l_w + (n_s1-1) * p_w, np.deg2rad(-90.0)]) # left lane outside parking row
+dynamic_veh_0 = np.array([np.array([x_min + l_w + 2 * p_l + 3*l_w / 4, y_min + l_w + n_s1 * p_w, np.deg2rad(90.0)])
+                          ])
+dynamic_veh_0 = dynamic_veh_0[:n_vehicles]
+# dynamic_veh_0 = np.array([np.array([x_min + l_w + 2 * p_l + l_w / 4, y_min + l_w + n_s1 * p_w, np.deg2rad(-90.0)])]) # parking in
+Sigma_0 = np.array([[[0.5*Car_obj.length, 0], [0, 0.5*Car_obj.width]],
+                    [[0.5*Car_obj.length, 0], [0, 0.5*Car_obj.width]],
+                    [[0.005*Car_obj.length, 0], [0, 0.005*Car_obj.width]]])  # Covariance for each vehicle
+Sigma_0 = Sigma_0[:n_vehicles]
+dynamic_veh_vel = np.array([np.array([0.0, -0.5, 0.0]),
+                            np.array([-0.01, 0.0, 0.0]),
+                            np.array([0.0, -0.001, 0.0])])
+dynamic_veh_vel = dynamic_veh_vel[:n_vehicles]
+dynamic_veh_parking = [2, 0, 0] # 1 is parking in, 2 is getting out, 0 is cruising
+dynamic_veh_parking = dynamic_veh_parking[:n_vehicles]
 length_preds = T+1
 dynamic_veh_path = []
 for veh_i, veh_parking in enumerate(dynamic_veh_parking):
     if veh_parking==1:
         ## dynamic_veh to spot
         path_veh = hybrid_a_star_planning(dynamic_veh_0[0], g_list[2], ox, oy, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION)
-        extra_time_steps = int(length_preds - len(path_veh.x_list))
-        path_veh_n = np.array([path_veh.x_list, path_veh.y_list, path_veh.yaw_list]).T
-        last_state = path_veh_n[-1]
-        repeat_veh = np.repeat(last_state.reshape((1, -1)), repeats=extra_time_steps, axis=0)
-        path_veh_n = np.vstack((path_veh_n, repeat_veh))
+        if length_preds > len(path_veh.x_list):
+            extra_time_steps = int(length_preds - len(path_veh.x_list))
+            path_veh_n = np.array([path_veh.x_list, path_veh.y_list, path_veh.yaw_list]).T
+            last_state = path_veh_n[-1]
+            repeat_veh = np.repeat(last_state.reshape((1, -1)), repeats=extra_time_steps, axis=0)
+            path_veh_n = np.vstack((path_veh_n, repeat_veh))
+        else:
+            path_veh_n = np.array([path_veh.x_list, path_veh.y_list, path_veh.yaw_list]).T
+            path_veh_n = path_veh_n[:length_preds]
+
     elif veh_parking==2:
         ## dynamic_veh out of spot
-        path_veh = hybrid_a_star_planning(g_list[3], dynamic_veh_0[0], ox, oy, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION)
-        extra_time_steps = int(length_preds - len(path_veh.x_list))
-        path_veh_n = np.array([path_veh.x_list, path_veh.y_list, path_veh.yaw_list]).T
-        last_state = path_veh_n[-1]
-        repeat_veh = np.repeat(last_state.reshape((1, -1)), repeats=extra_time_steps, axis=0)
-        path_veh_n = np.vstack((path_veh_n, repeat_veh))
+        path_veh = hybrid_a_star_planning(g_list[0], dynamic_veh_0[0], ox, oy, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION)
+        if length_preds > len(path_veh.x_list):
+            extra_time_steps = int(length_preds - len(path_veh.x_list))
+            path_veh_n = np.array([path_veh.x_list, path_veh.y_list, path_veh.yaw_list]).T
+            last_state = path_veh_n[-1]
+            repeat_veh = np.repeat(last_state.reshape((1, -1)), repeats=extra_time_steps, axis=0)
+            path_veh_n = np.vstack((path_veh_n, repeat_veh))
+        else:
+            path_veh_n = np.array([path_veh.x_list, path_veh.y_list, path_veh.yaw_list]).T
+            path_veh_n = path_veh_n[:length_preds]
     else:
         ## dynamic_veh constant velocity
         veh_vel = dynamic_veh_vel[veh_i]
@@ -193,8 +312,8 @@ for veh_i, veh_parking in enumerate(dynamic_veh_parking):
     dynamic_veh_path.append(path_veh_n)
 
 dynamic_veh_path=np.array(dynamic_veh_path)
-skip = 5
-T = int(T/skip)
+skip = 2 # wrt MOTION_RESOLUTION
+T_prob  = int(T/skip)
 dynamic_veh_path = dynamic_veh_path[:, 0:dynamic_veh_path.shape[1]:skip , :]
 Q = np.array([[0.5, 0], [0, 0.5]])  # Process noise (uncertainty growth)
 
@@ -241,23 +360,34 @@ for veh_i in range(len(dynamic_veh_path)):
         Sigma_t[veh_i] = Sigma_t[veh_i] + Q
 
 # Compute occupancy probabilities for multiple vehicles and spots
-P_O = occupancy_probability_multiple_spots(T, dynamic_veh_path, Sigma_0, Q, park_spots_xy, Car_obj)
+time_all = []
+for i in range(100):
+    start_t = time.time()
+    P_O = occupancy_probability_multiple_spots(T_prob, dynamic_veh_path, Sigma_0, Q, park_spots_xy, Car_obj)
+    time_all.append(time.time() - start_t)
 
 fig_p, ax_p = pl.subplots()
 for i in range(P_O.shape[1]):
     label_i = 'Spot' + str(i+1)
-    ax_p.plot(skip*np.arange(P_O.shape[0]), P_O[:, i], marker='o', markersize=12, label=label_i)
+    ax_p.plot(np.arange(P_O.shape[0]), P_O[:, i], marker='o', markersize=12, label=label_i)
     ax_p.tick_params(axis='both', which='major', labelsize=20)
     ax_p.set_xlabel("Time (s)", fontsize=20)
     ax_p.set_ylabel("Occupancy Probability", fontsize=20)
+    ax_p.set_yticks(np.arange(0, 1, 0.1))
+    ax_p.grid(True)
 
 ax_p.legend(fontsize=24)
 
 # Print results
-for t in range(T + 1):
-    print(f"Time {int(t*skip)}:")
+for t in range(T_prob + 1):
+    print(f"Time {int(t)}:")
     for j in range(n_spots):
         print(f"  Spot {j + 1}: P(O_t) = {P_O[t, j]:.3f}")
+
+avg_time = np.mean(time_all[1:])
+std_time = np.std(time_all[1:])
+print("Avg Comp time: ", avg_time)
+print("STD Comp time: ", std_time)
 
 ax.axis('equal')
 plt.show()

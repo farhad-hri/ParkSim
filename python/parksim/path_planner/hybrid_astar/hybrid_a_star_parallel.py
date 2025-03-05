@@ -60,7 +60,7 @@ DYNAMIC_SAFE_NET_PED = 0.9
 MAX_WAIT_TIME = 5 # actual time (secs)
 INC_WAT_TIME = 1
 
-V_MAX = 2.0
+V_MAX = 3.0
 A_MAX = 2*V_MAX/MOTION_RESOLUTION
 
 show_animation = False
@@ -193,7 +193,7 @@ def analytic_expansion(current, goal, ox, oy, kd_tree):
     max_curvature = math.tan(MAX_STEER) / WB
     paths = rs.calc_paths(start_x, start_y, start_yaw,
                           goal_x, goal_y, goal_yaw,
-                          max_curvature, step_size=MOTION_RESOLUTION)
+                          max_curvature, step_size=V_MAX*MOTION_RESOLUTION)
 
     if not paths:
         return None
