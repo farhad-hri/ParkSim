@@ -1,6 +1,4 @@
 import numpy as np
-import pylab as pl
-from scipy.stats import norm
 import os
 import json
 from itertools import chain
@@ -209,7 +207,7 @@ def occupancy_probability_multiple_spots(T, dynamic_veh_path, Sigma_0, Q, park_s
     P_O_result[:, 1] = P_O[:, 1]
     return P_O_result
 
-type='lot'
+type='big_lot'
 
 home_path = os.path.abspath(os.getcwd())
 
@@ -366,7 +364,7 @@ for i in range(100):
     P_O = occupancy_probability_multiple_spots(T_prob, dynamic_veh_path, Sigma_0, Q, park_spots_xy, Car_obj)
     time_all.append(time.time() - start_t)
 
-fig_p, ax_p = pl.subplots()
+fig_p, ax_p = plt.subplots()
 for i in range(P_O.shape[1]):
     label_i = 'Spot' + str(i+1)
     ax_p.plot(np.arange(P_O.shape[0]), P_O[:, i], marker='o', markersize=12, label=label_i)

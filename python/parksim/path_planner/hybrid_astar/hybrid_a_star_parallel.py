@@ -448,10 +448,41 @@ class Car_class:
         self.width = config_planner['vehicle-params']['vehicle_width']
         self.safety_margin = config_planner['HA*-params']['safety_margin']
 
-def map_lot(type, config_map, Car_obj):
+def map_lot_place_cars(p_x, p_y, p_yaw, indices, Car_obj, p_w, n_s1, obstacleX, obstacleY, center_spots, ax):
 
-    s = config_map['map-params'][type]['start'][:3]
-    s[2] = np.deg2rad(s[2])
+    car = np.array(
+        [[-Car_obj.length/2, -Car_obj.length/2, Car_obj.length/2, Car_obj.length/2, -Car_obj.length/2],
+         [Car_obj.width / 2, -Car_obj.width / 2, -Car_obj.width / 2, Car_obj.width / 2, Car_obj.width / 2]])
+
+    rotationZ = np.array([[math.cos(p_yaw), -math.sin(p_yaw)],
+                          [math.sin(p_yaw), math.cos(p_yaw)]])
+
+    car = np.dot(rotationZ, car)
+
+    for j in range(n_s1):
+
+        p_y_j  = p_y + j * p_w
+
+        center_spots.append(np.array([p_x, p_y_j]))
+
+        if j in indices:
+
+            car1 = car + np.array([[p_x], [p_y_j]])  # (2xN) N are vertices
+
+            ax.plot(car1[0, :], car1[1, :], color='black', alpha=0.6)
+            ax.plot(p_x, p_y_j, marker='o', color='black', alpha=0.6)
+
+            ## Car
+            for i in range(car1.shape[1]-1):
+                line = np.linspace(car1[:, i], car1[:, i+1], num = 10, endpoint=False)
+                obstacleX = obstacleX + line[:, 0].tolist()
+                obstacleY = obstacleY + line[:, 1].tolist()
+        else:
+            ax.plot(p_x, p_y_j, marker='o', color='grey', alpha=0.6)
+
+    return obstacleX, obstacleY, center_spots
+
+def map_lot(type, config_map, Car_obj, ax):
 
     obstacleX, obstacleY = [], []
     ## Parallel Parking Map
@@ -461,20 +492,26 @@ def map_lot(type, config_map, Car_obj):
     p_w = config_map['map-params'][type]['park_width']
     p_l = config_map['map-params'][type]['park_length']
     n_r = config_map['map-params'][type]['n_rows']
-    n_s = config_map['map-params'][type]['n_spaces']
+    n_s = config_map['map-params'][type]['n_spaces']  # total number of spaces in one row
 
-    s[0] = s[0] + l_w + 2*p_l + 0.75*l_w
-    s[1] = s[1] + 0.2*l_w # 0.8*l_w for -np.deg2rad(s[2]) (-90 deg)
+    n_s1 = int(n_s / 2) # number of spaces on one side of each row
 
-    n_s1 = int(n_s/2)
+    ## lot
+    # s = config_map['map-params'][type]['start'][:3]
+    # s[2] = np.deg2rad(s[2])
+    # s[0] = s[0] + l_w + 2*p_l + 0.75*l_w
+    # s[1] = s[1] + 0.2*l_w # 0.8*l_w for -np.deg2rad(s[2]) (-90 deg)
 
-    x_max = int(x_min + (n_r+1)*l_w + 2*n_r*p_l)
-    y_max = int(y_min + l_w + n_s1 * p_w + l_w)
+    x_max = x_min + (n_r+1)*l_w + 2*n_r*p_l
+    y_max = y_min + l_w + n_s1 * p_w + l_w
 
-    # x_min = s[0] - 10.0*
-    # x_max = s[0] + 10.0
-    # y_min = s[1] - 5.0
-    # y_max = s[1] + 15.0
+    ## big_lot: center of vehicle
+    #s = [x_min + (x_max - x_min)/2, y_max - l_w/4, np.deg2rad(-180.0)] # start_x is middle, start_y is close to y_max
+    s = [x_min + 2*l_w + 4*p_l + 1*l_w/4, y_max - l_w - p_w, np.deg2rad(-90.0)] # start_x is middle, start_y is close to y_max
+    plot_car(s[0], s[1], s[2], ax)
+
+    center_spots = []
+    occ_spot_indices = []
 
     center_line_park_row_y = [y_min + l_w, y_max - l_w]
 
@@ -482,6 +519,7 @@ def map_lot(type, config_map, Car_obj):
 
     for _ in range(n_r):
         center_line_park_row_x = [center_line_park_row_x_1] * len(center_line_park_row_y)
+        ax.plot(center_line_park_row_x, center_line_park_row_y, color='grey', linestyle='--', alpha=0.6)
 
         short_line_park_row_x = [center_line_park_row_x_1- p_l, center_line_park_row_x_1 + p_l]
 
@@ -493,222 +531,59 @@ def map_lot(type, config_map, Car_obj):
 
         center_line_park_row_x_1 += 2*p_l + l_w
 
-    # parked cars 0
-    p_x = x_min + 1 * l_w + p_l / 2 + Car_obj.length / 2 - Car_obj.axleToBack
-    p_yaw = np.pi
-    j_indices = [0, 1, 2, 3]
+    yaw_r = [np.pi, 0.0] # car facing away from the center line aka reverse-in parking
+    # probabilities
+    rng = np.random.default_rng(1)
+    p_min = config_map['map-params'][type]['occ_prob_min']
+    p_max = config_map['map-params'][type]['occ_prob_max']
+    p_delta = 0.5 - p_min
 
-    car = np.array(
-        [[-Car_obj.axleToBack, -Car_obj.axleToBack, Car_obj.axleToFront, Car_obj.axleToFront, -Car_obj.axleToBack],
-         [Car_obj.width / 2, -Car_obj.width / 2, -Car_obj.width / 2, Car_obj.width / 2, Car_obj.width / 2]])
+    # maximum at middle of the sequence of rows
+    p_start_all = [p_min + (i/n_r)*(0.5 - p_min) for i in range(n_r)] + [0.5 - ((i+1)/n_r)*(0.5 - p_min) for i in range(n_r)]
 
-    rotationZ = np.array([[math.cos(p_yaw), -math.sin(p_yaw)],
-                          [math.sin(p_yaw), math.cos(p_yaw)]])
+    for row_split_i in range(int(2*n_r)):
+        # probability of occupancy
+        p_start = p_start_all[row_split_i]
+        p_end = min(p_max, p_start + p_delta)
 
-    car = np.dot(rotationZ, car)
+        p_vertical = np.linspace(p_start, p_end, num=n_s1)
+        indices = np.where(rng.binomial(1, p_vertical, size=n_s1))[0] # occupied
 
-    for j in j_indices:
+        indices_row = indices + row_split_i*n_s1
+        occ_spot_indices = occ_spot_indices + indices_row.tolist()
+        # parked cars
+        s_x = x_min + (1 + int(row_split_i / 2)) * l_w + row_split_i * p_l + p_l / 2
+        s_y = y_min + l_w + p_w / 2
 
-        p_y = y_min + l_w + j * p_w + p_w / 2
+        p_x = s_x
+        p_y = s_y
+        p_yaw = yaw_r[row_split_i%2]
 
-        car1 = car + np.array([[p_x], [p_y]]) # (2xN) N are vertices
+        obstacleX, obstacleY, center_spots = map_lot_place_cars(p_x, p_y, p_yaw, indices, Car_obj, p_w, n_s1, obstacleX, obstacleY, center_spots, ax)
 
-        ## Car
-        for i in range(car1.shape[1]-1):
-            line = np.linspace(car1[:, i], car1[:, i+1], num = 10, endpoint=False)
-            obstacleX = obstacleX + line[:, 0].tolist()
-            obstacleY = obstacleY + line[:, 1].tolist()
-
-        ## Car
-        # for i in range(car1.shape[1]-1):
-        #     obstacleX.append(car1[0, i])
-        #     obstacleY.append(car1[1, i])
-        #
-        # for i in range(math.floor(car1[1, 0]), math.ceil(car1[1, 1])-1, -1):
-        #     obstacleX.append(car1[0, 0])
-        #     obstacleY.append(i)
-        #
-        # for i in range(math.ceil(car1[0, 1]), math.floor(car1[0, 2])+1):
-        #     obstacleY.append(car1[1, 1])
-        #     obstacleX.append(i)
-        #
-        # for i in range(math.ceil(car1[1, 2]), math.floor(car1[1, 3])+1):
-        #     obstacleX.append(car1[0, 2])
-        #     obstacleY.append(i)
-        #
-        # for i in range(math.floor(car1[0, 3]), math.ceil(car1[0, 4]), -1):
-        #     obstacleY.append(car1[1, 3])
-        #     obstacleX.append(i)
-
-    # parked cars 1
-    p_x = x_min + 1 * l_w + 1 * p_l + p_l / 2 - (Car_obj.length / 2 - Car_obj.axleToBack)
-    p_yaw = 0.0
-    j_indices = [0, 2, 3]
-
-    for j in j_indices:
-
-        if j==2:
-            p_yaw = 0.0*np.pi/180
-            p_y = y_min + l_w + j * p_w + p_w / 2 - 0.1 # -0.1 is disturbance
-        else:
-            p_yaw = 0.0
-            p_y = y_min + l_w + j * p_w + p_w / 2
-
-        ## Car
-        car = np.array(
-            [[-Car_obj.axleToBack, -Car_obj.axleToBack, Car_obj.axleToFront, Car_obj.axleToFront, -Car_obj.axleToBack],
-             [Car_obj.width / 2, -Car_obj.width / 2, -Car_obj.width / 2, Car_obj.width / 2, Car_obj.width / 2]])
-
-        rotationZ = np.array([[math.cos(p_yaw), -math.sin(p_yaw)],
-                              [math.sin(p_yaw), math.cos(p_yaw)]])
-
-        car = np.dot(rotationZ, car)
-
-        car1 = car + np.array([[p_x], [p_y]]) # (2xN) N are vertices
-
-        # ## Car
-        for i in range(car1.shape[1]-1):
-            line = np.linspace(car1[:, i], car1[:, i+1], num = 10, endpoint=False)
-            obstacleX = obstacleX + line[:, 0].tolist()
-            obstacleY = obstacleY + line[:, 1].tolist()
-
-        # for i in range(car1.shape[1]-1):
-        #     obstacleX.append(car1[0, i])
-        #     obstacleY.append(car1[1, i])
-        #
-        # for i in range(math.floor(car1[1, 0]), math.ceil(car1[1, 1])-1, -1):
-        #     obstacleX.append(car1[0, 0])
-        #     obstacleY.append(i)
-        #
-        # for i in range(math.ceil(car1[0, 1]), math.floor(car1[0, 2])+1):
-        #     obstacleY.append(car1[1, 1])
-        #     obstacleX.append(i)
-        #
-        # for i in range(math.ceil(car1[1, 2]), math.floor(car1[1, 3])+1):
-        #     obstacleX.append(car1[0, 2])
-        #     obstacleY.append(i)
-        #
-        # for i in range(math.floor(car1[0, 3]), math.ceil(car1[0, 4]), -1):
-        #     obstacleY.append(car1[1, 3])
-        #     obstacleX.append(i)
-
-
-    # parked cars 2
-    p_x = x_min + 2 * l_w + 2 * p_l + p_l / 2 + Car_obj.length / 2 - Car_obj.axleToBack
-    p_yaw = np.pi
-    j_indices = [0, 2, 3]
-
-    car = np.array(
-        [[-Car_obj.axleToBack, -Car_obj.axleToBack, Car_obj.axleToFront, Car_obj.axleToFront, -Car_obj.axleToBack],
-         [Car_obj.width / 2, -Car_obj.width / 2, -Car_obj.width / 2, Car_obj.width / 2, Car_obj.width / 2]])
-
-    rotationZ = np.array([[math.cos(p_yaw), -math.sin(p_yaw)],
-                          [math.sin(p_yaw), math.cos(p_yaw)]])
-
-    car = np.dot(rotationZ, car)
-    for j in  j_indices:
-
-        p_y = y_min + l_w + j * p_w + p_w / 2
-
-        car1 = car + np.array([[p_x], [p_y]]) # (2xN) N are vertices
-
-        ## Car
-        for i in range(car1.shape[1]-1):
-            line = np.linspace(car1[:, i], car1[:, i+1], num = 10, endpoint=False)
-            obstacleX = obstacleX + line[:, 0].tolist()
-            obstacleY = obstacleY + line[:, 1].tolist()
-
-        # for i in range(car1.shape[1]-1):
-        #     obstacleX.append(car1[0, i])
-        #     obstacleY.append(car1[1, i])
-        #
-        # for i in range(math.floor(car1[1, 0]), math.ceil(car1[1, 1])-1, -1):
-        #     obstacleX.append(car1[0, 0])
-        #     obstacleY.append(i)
-        #
-        # for i in range(math.ceil(car1[0, 1]), math.floor(car1[0, 2])+1):
-        #     obstacleY.append(car1[1, 1])
-        #     obstacleX.append(i)
-        #
-        # for i in range(math.ceil(car1[1, 2]), math.floor(car1[1, 3])+1):
-        #     obstacleX.append(car1[0, 2])
-        #     obstacleY.append(i)
-        #
-        # for i in range(math.floor(car1[0, 3]), math.ceil(car1[0, 4]), -1):
-        #     obstacleY.append(car1[1, 3])
-        #     obstacleX.append(i)
-
-
-    # parked cars 3
-    p_x = x_min + 2 * l_w + 3 * p_l + p_l / 2 - (Car_obj.length / 2 - Car_obj.axleToBack)
-    p_yaw = 0.0
-    j_indices = [0, 1, 2, 3]
-
-    car = np.array(
-        [[-Car_obj.axleToBack, -Car_obj.axleToBack, Car_obj.axleToFront, Car_obj.axleToFront, -Car_obj.axleToBack],
-         [Car_obj.width / 2, -Car_obj.width / 2, -Car_obj.width / 2, Car_obj.width / 2, Car_obj.width / 2]])
-
-    rotationZ = np.array([[math.cos(p_yaw), -math.sin(p_yaw)],
-                          [math.sin(p_yaw), math.cos(p_yaw)]])
-
-    car = np.dot(rotationZ, car)
-    for j in  j_indices:
-
-        p_y = y_min + l_w + j * p_w + p_w / 2
-
-        car1 = car + np.array([[p_x], [p_y]]) # (2xN) N are vertices
-
-        ## Car
-        for i in range(car1.shape[1] - 1):
-            line = np.linspace(car1[:, i], car1[:, i + 1], num = 10, endpoint=False)
-            obstacleX = obstacleX + line[:, 0].tolist()
-            obstacleY = obstacleY + line[:, 1].tolist()
-
-        # for i in range(car1.shape[1]-1):
-        #     obstacleX.append(car1[0, i])
-        #     obstacleY.append(car1[1, i])
-        #
-        # for i in range(math.floor(car1[1, 0]), math.ceil(car1[1, 1])-1, -1):
-        #     obstacleX.append(car1[0, 0])
-        #     obstacleY.append(i)
-        #
-        # for i in range(math.ceil(car1[0, 1]), math.floor(car1[0, 2])+1):
-        #     obstacleY.append(car1[1, 1])
-        #     obstacleX.append(i)
-        #
-        # for i in range(math.ceil(car1[1, 2]), math.floor(car1[1, 3])+1):
-        #     obstacleX.append(car1[0, 2])
-        #     obstacleY.append(i)
-        #
-        # for i in range(math.floor(car1[0, 3]), math.ceil(car1[0, 4]), -1):
-        #     obstacleY.append(car1[1, 3])
-        #     obstacleX.append(i)
-
-
-    # for ax in axes:
-    #     ax.scatter(parked_cars_x + moving_cars_x, parked_cars_y + moving_cars_y, color='black',
-    #             marker='s', s=6)
-
-    for i in range(x_min, x_max+1):
+    ax.plot([x_min, x_max, x_max, x_min, x_min], [y_min, y_min, y_max, y_max, y_min], color='black')
+    for i in np.linspace(x_min, x_max+1):
         obstacleX.append(i)
         obstacleY.append(y_min)
 
-    for i in range(y_min, y_max+1):
+    for i in np.linspace(y_min, y_max+1):
         obstacleX.append(x_min)
         obstacleY.append(i)
     #
-    for i in range(x_min, x_max+1):
+    for i in np.linspace(x_min, x_max+1):
         obstacleX.append(i)
         obstacleY.append(y_max)
 
-    for i in range(y_min, y_max+1):
+    for i in np.linspace(y_min, y_max+1):
         obstacleX.append(x_max)
         obstacleY.append(i)
 
     obstacleX.append(0.0)
     obstacleY.append(0.0)
 
-    return x_min, x_max, y_min, y_max, p_w, p_l, l_w, n_r, n_s, n_s1, obstacleX, obstacleY, s
+    center_spots = np.array(center_spots)
+
+    return x_min, x_max, y_min, y_max, p_w, p_l, l_w, n_r, n_s, n_s1, obstacleX, obstacleY, s, center_spots, occ_spot_indices
 
 def dist_to_obst(x, y, yaw, ox, oy):
     # transform obstacles to base link frame
