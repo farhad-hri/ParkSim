@@ -507,7 +507,7 @@ def map_lot(type, config_map, Car_obj, ax):
 
     ## big_lot: center of vehicle
     #s = [x_min + (x_max - x_min)/2, y_max - l_w/4, np.deg2rad(-180.0)] # start_x is middle, start_y is close to y_max
-    s = [x_min + 2*l_w + 4*p_l + 1*l_w/4, y_max - l_w - p_w, np.deg2rad(-90.0)] # start_x is middle, start_y is close to y_max
+    s = [x_min + 2*l_w + 4*p_l + 1*l_w/4, y_max - l_w - p_w/2, np.deg2rad(-90.0)] # start_x is middle, start_y is close to y_max
     plot_car(s[0], s[1], s[2], ax)
 
     center_spots = []
