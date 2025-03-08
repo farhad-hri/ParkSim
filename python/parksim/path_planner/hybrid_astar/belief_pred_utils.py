@@ -4,7 +4,7 @@ from scipy.spatial import distance
 from parksim.path_planner.hybrid_astar.hybrid_a_star_parallel import map_lot, Car_class, hybrid_a_star_planning, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION, MOTION_RESOLUTION
 from parksim.path_planner.hybrid_astar.car import plot_car, plot_other_car
 
-def mahalanobis_distance(mu, Sigma, park_spot, Car_obj):
+def mahalanobis_distance(mu, Sigma, park_spot, Car_obj, ped_flag):
     """
     Computes the Mahalanobis distance from the mean position `mu` to the nearest
     boundary of the rectangular parking spot.
@@ -33,7 +33,10 @@ def mahalanobis_distance(mu, Sigma, park_spot, Car_obj):
     # Find minimum Mahalanobis distance to any boundary
     # d_min = min(abs(d_x_min), abs(d_x_max), abs(d_y_min), abs(d_y_max))
 
-    d_min = distance.mahalanobis(park_spot[:2], mu[:2], Sigma)
+    if ped_flag:
+        d_min = 2*np.linalg.norm(park_spot[:2] - mu[:2])
+    else:
+        d_min = distance.mahalanobis(park_spot[:2], mu[:2], Sigma)
 
     alpha_g = 350
     prob = (alpha_g+1)/(alpha_g+np.exp(d_min))
@@ -71,7 +74,8 @@ def occupancy_probability_multiple_spots_occ_dep(T, dynamic_veh_path_t, ped_path
     ], axis=-2)
     Q_ped = 1*Q
     Sigma_t = np.array([rotation_matrices[i] @ (Sigma_0[i] + Q) @ rotation_matrices[i].T  for i in range(Sigma_0.shape[0])])  # Update covariances for dynamic veh
-    Sigma_t_ped = np.array([Sigma_0_ped[i] + Q_ped  for i in range(Sigma_0_ped.shape[0])]) # Update covariances for ped
+    Sigma_t_ped = np.array([Sigma_0_ped[i] + Q_ped for i in range(Sigma_0_ped.shape[0])]) # Update covariances for ped
+    n_vehs  = Sigma_t.shape[0]
 
     Sigma_t_all = np.vstack((Sigma_t, Sigma_t_ped))
     n_agents = Sigma_t_all.shape[0]
@@ -80,7 +84,7 @@ def occupancy_probability_multiple_spots_occ_dep(T, dynamic_veh_path_t, ped_path
 
     agent_path = np.vstack((dynamic_veh_path_t[:, :, :2], ped_path_t))
 
-    prob_t_dist = np.array([[mahalanobis_distance(agent_path[i, 0], Sigma_t_all[i], park_spots_xy[j], Car_obj) for i in range(n_agents)] for j in range(n_spots)]) # (n_spots, n_agents)
+    prob_t_dist = np.array([[mahalanobis_distance(agent_path[i, 0], Sigma_t_all[i], park_spots_xy[j], Car_obj, int(i/n_vehs)) for i in range(n_agents)] for j in range(n_spots)]) # (n_spots, n_agents)
 
     Sigma_t = Sigma_0
     Sigma_t_ped = Sigma_0_ped
@@ -165,8 +169,8 @@ def occupancy_probability_multiple_spots_occ_dep(T, dynamic_veh_path_t, ped_path
                                                    [0.0, rho]]))/MOTION_RESOLUTION**2
         vel_uncertainty = np.trace(Sigma_vel_t, axis1=1, axis2=2) # (n_agents,)
         # Compute probability of being inside parking spot for each agent and each spot (n_spots x n_agents)
-        prob_t_dist = np.array([[mahalanobis_distance(mu_t[i], Sigma_t_all[i], park_spots_xy[j], Car_obj) for i in range(n_agents)] for j in range(n_spots)])
-        prob_t =prob_t_dist*(1/(1+np.exp(-0.001*dot_prod/vel_uncertainty[np.newaxis, :])))# including velocity information
+        prob_t_dist = np.array([[mahalanobis_distance(mu_t[i], Sigma_t_all[i], park_spots_xy[j], Car_obj, int(i/n_vehs)) for i in range(n_agents)] for j in range(n_spots)])
+        prob_t = prob_t_dist*(1/(1+np.exp(-0.001*dot_prod/vel_uncertainty[np.newaxis, :])))# including velocity information
         # prob_t = prob_t_dist
 
         prob_t_new = 1 - np.prod(1 - prob_t, axis=1)  # Probability that at least one agent occupies each spot using only dynamic agents
@@ -174,8 +178,8 @@ def occupancy_probability_multiple_spots_occ_dep(T, dynamic_veh_path_t, ped_path
         P_O_vacant[k] = alpha * P_O_vacant[k - 1] + prob_t_new[:len(vac_spots)] * (1 - P_O_vacant[k - 1])
 
         # P_O_vacant[k] = prob_t_new[:len(vac_spots)]
-        P_O_occ[k] = prob_t_new[len(vac_spots):len(vac_spots)+len(occ_spots_veh)+len(occ_spots_ped)]
+        # P_O_occ[k] = prob_t_new[len(vac_spots):len(vac_spots)+len(occ_spots_veh)+len(occ_spots_ped)]
 
-        # P_O_occ[k] = 1-(alpha * (1-P_O_occ[k - 1]) + (1-prob_t_new[len(vac_spots):len(vac_spots)+len(occ_spots_veh)+len(occ_spots_ped)]) * (P_O_occ[k - 1]))
+        P_O_occ[k] = 1-(alpha * (1-P_O_occ[k - 1]) + (1-prob_t_new[len(vac_spots):len(vac_spots)+len(occ_spots_veh)+len(occ_spots_ped)]) * (P_O_occ[k - 1]))
 
     return P_O_vacant, P_O_occ

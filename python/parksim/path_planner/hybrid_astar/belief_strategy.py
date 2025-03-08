@@ -172,21 +172,21 @@ p = np.array(s)
 
 ## Get the complete path of dynamic agents
 # Vehicle
-# dynamic_veh_0 = np.array([np.hstack((center_spots[29] + np.array([Car_obj.length/4, 0.0]), np.deg2rad(0.0))),
-#                           np.hstack((center_spots[32] + np.array([-Car_obj.length/2-l_w/4, -l_w/2]), np.deg2rad(90.0)))
-#                           ])
-
-# dynamic_veh_goal = np.array([np.hstack((center_spots[29] + np.array([-Car_obj.length/2-l_w/4, 2.0]), np.deg2rad(90.0))),
-#                              np.hstack((center_spots[35], np.deg2rad(0.0)))
-#                           ])
-
-dynamic_veh_0 = np.array([np.hstack((center_spots[35] + np.array([-Car_obj.length/2 - l_w/3, p_w]), np.deg2rad(110.0))),
+dynamic_veh_0 = np.array([np.hstack((center_spots[29], np.deg2rad(0.0))),
                           np.hstack((center_spots[32] + np.array([-Car_obj.length/2-l_w/4, -l_w/2]), np.deg2rad(90.0)))
                           ])
 
-dynamic_veh_goal = np.array([np.hstack((center_spots[29], np.deg2rad(-180.0))),
+dynamic_veh_goal = np.array([np.hstack((center_spots[39] + np.array([-Car_obj.length/2 - l_w/4, p_w]), np.deg2rad(90.0))),
                              np.hstack((center_spots[35], np.deg2rad(0.0)))
                           ])
+
+# dynamic_veh_0 = np.array([np.hstack((center_spots[35] + np.array([-Car_obj.length/2 - l_w/3, p_w]), np.deg2rad(110.0))),
+#                           np.hstack((center_spots[32] + np.array([-Car_obj.length/2-l_w/4, -l_w/2]), np.deg2rad(90.0)))
+#                           ])
+#
+# dynamic_veh_goal = np.array([np.hstack((center_spots[29], np.deg2rad(-180.0))),
+#                              np.hstack((center_spots[35], np.deg2rad(0.0)))
+#                           ])
 
 dynamic_veh_parking = [1, 1]
 T = 30 # total number of time steps
@@ -214,7 +214,7 @@ for veh_i, veh_parking in enumerate(dynamic_veh_parking):
 dynamic_veh_path=np.array(dynamic_veh_path)
 
 # Pedestrian
-ped_0 = np.array([center_spots[28] + np.array([Car_obj.length/2-1, -Car_obj.width/2-1])
+ped_0 = np.array([center_spots[20] + np.array([Car_obj.length/2-1, -Car_obj.width/2-1])
                   ])
 ped_vel = np.array([[-0.9, -1.0]
                     ])
@@ -229,7 +229,7 @@ ped_path = np.array([np.vstack((ped_init[j], np.array([ped_0[j] + MOTION_RESOLUT
 static_xy = np.array([obstacleX, obstacleY]).T
 static_obs_kd_tree = cKDTree(static_xy)
 
-t=10
+t=5
 T_pred = 5 # time steps
 dynamic_veh_path_t = dynamic_veh_path[:, t:t+T_pred+1]
 ped_path_t = ped_path[:, t:t+T_pred+1]
@@ -245,7 +245,7 @@ print(f"Occupied spots: {occ_spots}, Vacant Spots: {vac_spots}")
 print(f"Occupied by Vehicle: {occ_spots_veh}, Occupied by Pedestrian: {occ_spots_ped}")
 
 Sigma_0 = np.repeat(np.array([[[0.5*Car_obj.length, 0], [0, 0.5*Car_obj.width]]]), repeats=dynamic_veh_0.shape[0], axis=0)  # Covariance for each vehicle
-Sigma_0_ped = np.repeat(np.array([[[PED_RAD, 0], [0, PED_RAD]]]), repeats=ped_0.shape[0], axis=0) # Covariance for each pedestrian
+Sigma_0_ped = np.repeat(np.array([[[0.001*PED_RAD, 0], [0, 0.001*PED_RAD]]]), repeats=ped_0.shape[0], axis=0) # Covariance for each pedestrian
 Q = np.array([[0.5, 0], [0, 0.5]])  # Process noise (uncertainty growth)
 
 P_O_vacant, P_O_occ = occupancy_probability_multiple_spots_occ_dep(T_pred, dynamic_veh_path_t, ped_path_t, Sigma_0, Sigma_0_ped, Q, center_spots, vac_spots, occ_spots_veh, occ_spots_ped, Car_obj)
