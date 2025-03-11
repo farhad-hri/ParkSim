@@ -19,22 +19,24 @@ def mahalanobis_distance(mu, Sigma, park_spot, Car_obj, ped_flag):
     - mahalanobis_distance/probability
     """
 
-    x_min = park_spot[0]-Car_obj.length/2
-    x_max = park_spot[0] + Car_obj.length / 2
-    y_min = park_spot[1] - Car_obj.width / 2
-    y_max = park_spot[1] + Car_obj.width / 2
+    # x_min = park_spot[0]-Car_obj.length/2
+    # x_max = park_spot[0] + Car_obj.length / 2
+    # y_min = park_spot[1] - Car_obj.width / 2
+    # y_max = park_spot[1] + Car_obj.width / 2
 
     # Compute Mahalanobis distance to each boundary
-    d_x_min = (x_min - mu[0]) / np.sqrt(Sigma[0, 0])
-    d_x_max = (x_max - mu[0]) / np.sqrt(Sigma[0, 0])
-    d_y_min = (y_min - mu[1]) / np.sqrt(Sigma[1, 1])
-    d_y_max = (y_max - mu[1]) / np.sqrt(Sigma[1, 1])
+    # d_x_min = (x_min - mu[0]) / np.sqrt(Sigma[0, 0])
+    # d_x_max = (x_max - mu[0]) / np.sqrt(Sigma[0, 0])
+    # d_y_min = (y_min - mu[1]) / np.sqrt(Sigma[1, 1])
+    # d_y_max = (y_max - mu[1]) / np.sqrt(Sigma[1, 1])
 
     # Find minimum Mahalanobis distance to any boundary
     # d_min = min(abs(d_x_min), abs(d_x_max), abs(d_y_min), abs(d_y_max))
 
     if ped_flag:
-        d_min = 2*np.linalg.norm(park_spot[:2] - mu[:2])
+        ped_un = np.trace(Sigma)
+        ped_un = 1
+        d_min = 2*np.linalg.norm((park_spot[:2] - mu[:2])*ped_un)
     else:
         d_min = distance.mahalanobis(park_spot[:2], mu[:2], Sigma)
 
@@ -72,7 +74,7 @@ def occupancy_probability_multiple_spots_occ_dep(T, dynamic_veh_path_t, ped_path
         np.stack([cos_theta, -sin_theta], axis=-1),
         np.stack([sin_theta, cos_theta], axis=-1)
     ], axis=-2)
-    Q_ped = 1*Q
+    Q_ped = 0.01*Q
     Sigma_t = np.array([rotation_matrices[i] @ (Sigma_0[i] + Q) @ rotation_matrices[i].T  for i in range(Sigma_0.shape[0])])  # Update covariances for dynamic veh
     Sigma_t_ped = np.array([Sigma_0_ped[i] + Q_ped for i in range(Sigma_0_ped.shape[0])]) # Update covariances for ped
     n_vehs  = Sigma_t.shape[0]
@@ -119,7 +121,8 @@ def occupancy_probability_multiple_spots_occ_dep(T, dynamic_veh_path_t, ped_path
 
     Sigma_vel_t = (2 * Sigma_t_all + Q - 2 * np.array([[rho, 0.0],
                                                        [0.0, rho]])) / MOTION_RESOLUTION ** 2
-    vel_uncertainty = np.trace(Sigma_vel_t, axis1=1, axis2=2)  # (n_agents,)
+    vel_uncertainty_trace = np.trace(Sigma_vel_t, axis1=1, axis2=2)  # (n_agents,)
+    vel_uncertainty = np.max(np.vstack((vel_uncertainty_trace, np.array([0.001]*n_agents))), axis=0)
     prob_t = prob_t_dist * (1 / (1 + np.exp(-0.001 * dot_prod / vel_uncertainty[np.newaxis, :])))  # including velocity information
     prob_t_new = 1 - np.prod(1 - prob_t, axis=1)  # Probability that at least one agent occupies each spot using only dynamic agents
     P_O_vacant[0] = prob_t_new[:len(vac_spots)]
@@ -163,11 +166,13 @@ def occupancy_probability_multiple_spots_occ_dep(T, dynamic_veh_path_t, ped_path
         Sigma_t_ped = np.array([Sigma_t_ped[i] + Q_ped for i in range(Sigma_t_ped.shape[0])])  # Update covariances for ped
         Sigma_t_all = np.vstack((Sigma_t, Sigma_t_ped))
 
-        rho = 0.0
+        rho = 0.8
 
         Sigma_vel_t = (2*Sigma_t_all + Q - 2*np.array([[rho, 0.0],
                                                    [0.0, rho]]))/MOTION_RESOLUTION**2
-        vel_uncertainty = np.trace(Sigma_vel_t, axis1=1, axis2=2) # (n_agents,)
+        vel_uncertainty_trace = np.trace(Sigma_vel_t, axis1=1, axis2=2)  # (n_agents,)
+        vel_uncertainty = np.max(np.vstack((vel_uncertainty_trace, np.array([0.001] * n_agents))), axis=0)
+
         # Compute probability of being inside parking spot for each agent and each spot (n_spots x n_agents)
         prob_t_dist = np.array([[mahalanobis_distance(mu_t[i], Sigma_t_all[i], park_spots_xy[j], Car_obj, int(i/n_vehs)) for i in range(n_agents)] for j in range(n_spots)])
         prob_t = prob_t_dist*(1/(1+np.exp(-0.001*dot_prod/vel_uncertainty[np.newaxis, :])))# including velocity information

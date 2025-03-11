@@ -57,7 +57,7 @@ COS_COST = 1.0 # cosine distance cost, aka, change in heading
 PED_RAD = 0.7
 DYNAMIC_SAFE_NET = 0.5
 DYNAMIC_SAFE_NET_PED = 0.9
-MAX_WAIT_TIME = 5 # actual time (secs)
+MAX_WAIT_TIME = 4 # actual time (secs)
 INC_WAT_TIME = 1
 
 V_MAX = 3.0
@@ -312,8 +312,8 @@ def hybrid_a_star_planning(start, goal, ox, oy, xy_resolution, yaw_resolution):
 
     while True:
         if not openList:
-            print("Error: Cannot find path, No open set")
-            return [], [], []
+            # print("Error: Cannot find path, No open set")
+            return [], False
 
         cost, c_id = heapq.heappop(pq)
         if c_id in openList:
@@ -351,7 +351,7 @@ def hybrid_a_star_planning(start, goal, ox, oy, xy_resolution, yaw_resolution):
                 openList[neighbor_index] = neighbor
 
     path = get_final_path(closedList, final_path)
-    return path
+    return path, True
 
 
 def calc_cost(n, h_dp, c):
@@ -448,7 +448,7 @@ class Car_class:
         self.width = config_planner['vehicle-params']['vehicle_width']
         self.safety_margin = config_planner['HA*-params']['safety_margin']
 
-def map_lot_place_cars(p_x, p_y, p_yaw, indices, Car_obj, p_w, n_s1, obstacleX, obstacleY, center_spots, ax):
+def map_lot_place_cars(p_x, p_y, p_yaw, indices, Car_obj, p_w, n_s1, obstacleX, obstacleY, center_spots, axes):
 
     car = np.array(
         [[-Car_obj.length/2, -Car_obj.length/2, Car_obj.length/2, Car_obj.length/2, -Car_obj.length/2],
@@ -468,9 +468,9 @@ def map_lot_place_cars(p_x, p_y, p_yaw, indices, Car_obj, p_w, n_s1, obstacleX, 
         if j in indices:
 
             car1 = car + np.array([[p_x], [p_y_j]])  # (2xN) N are vertices
-
-            ax.plot(car1[0, :], car1[1, :], color='black', alpha=0.6)
-            ax.plot(p_x, p_y_j, marker='o', color='black', alpha=0.6)
+            for ax in axes:
+                ax.plot(car1[0, :], car1[1, :], color='black', alpha=0.6)
+                ax.plot(p_x, p_y_j, marker='o', color='black', alpha=0.6)
 
             ## Car
             for i in range(car1.shape[1]-1):
@@ -478,11 +478,12 @@ def map_lot_place_cars(p_x, p_y, p_yaw, indices, Car_obj, p_w, n_s1, obstacleX, 
                 obstacleX = obstacleX + line[:, 0].tolist()
                 obstacleY = obstacleY + line[:, 1].tolist()
         else:
-            ax.plot(p_x, p_y_j, marker='o', color='grey', alpha=0.6)
+            for ax in axes:
+                ax.plot(p_x, p_y_j, marker='o', color='grey', alpha=0.6)
 
     return obstacleX, obstacleY, center_spots
 
-def map_lot(type, config_map, Car_obj, ax):
+def map_lot(type, config_map, Car_obj, axes):
 
     obstacleX, obstacleY = [], []
     ## Parallel Parking Map
@@ -508,7 +509,6 @@ def map_lot(type, config_map, Car_obj, ax):
     ## big_lot: center of vehicle
     #s = [x_min + (x_max - x_min)/2, y_max - l_w/4, np.deg2rad(-180.0)] # start_x is middle, start_y is close to y_max
     s = [x_min + 2*l_w + 4*p_l + 1*l_w/4, y_max - l_w - p_w/2, np.deg2rad(-90.0)] # start_x is middle, start_y is close to y_max
-    plot_car(s[0], s[1], s[2], ax)
 
     center_spots = []
     occ_spot_indices = []
@@ -519,7 +519,8 @@ def map_lot(type, config_map, Car_obj, ax):
 
     for _ in range(n_r):
         center_line_park_row_x = [center_line_park_row_x_1] * len(center_line_park_row_y)
-        ax.plot(center_line_park_row_x, center_line_park_row_y, color='grey', linestyle='--', alpha=0.6)
+        for ax in axes:
+            ax.plot(center_line_park_row_x, center_line_park_row_y, color='grey', linestyle='--', alpha=0.6)
 
         short_line_park_row_x = [center_line_park_row_x_1- p_l, center_line_park_row_x_1 + p_l]
 
@@ -559,9 +560,11 @@ def map_lot(type, config_map, Car_obj, ax):
         p_y = s_y
         p_yaw = yaw_r[row_split_i%2]
 
-        obstacleX, obstacleY, center_spots = map_lot_place_cars(p_x, p_y, p_yaw, indices, Car_obj, p_w, n_s1, obstacleX, obstacleY, center_spots, ax)
+        obstacleX, obstacleY, center_spots = map_lot_place_cars(p_x, p_y, p_yaw, indices, Car_obj, p_w, n_s1, obstacleX, obstacleY, center_spots, axes)
 
-    ax.plot([x_min, x_max, x_max, x_min, x_min], [y_min, y_min, y_max, y_max, y_min], color='black')
+    for ax in axes:
+        ax.plot([x_min, x_max, x_max, x_min, x_min], [y_min, y_min, y_max, y_max, y_min], color='black')
+
     for i in np.linspace(x_min, x_max+1):
         obstacleX.append(i)
         obstacleY.append(y_min)
@@ -802,6 +805,7 @@ def evaluate_path(path_n, ox, oy, dynamic_veh_path, ped_path):
     #         ped_path[i] = np.vstack((ped_path[i], repeat_ped_veh))
 
     collision = True
+    path_result = []
     for curr_wait_time in range(MAX_WAIT_TIME+1):
         sum_dynamic_obst = 0.0
         sum_ped = 0.0
@@ -849,6 +853,7 @@ def evaluate_path(path_n, ox, oy, dynamic_veh_path, ped_path):
                 #         sum_ped += dist_current
 
         if not collision:
+            path_result = path_n_curr
             break
 
     cost_smooth = (1.0 * np.sum(np.linalg.norm(acc, axis=1) / A_MAX) + 1.0 * BACK_COST * len(reverse_indices) +
@@ -858,7 +863,7 @@ def evaluate_path(path_n, ox, oy, dynamic_veh_path, ped_path):
 
     cost = cost_obst + 1.0*cost_time + 1.0*cost_smooth
 
-    return cost, collision, curr_wait_time
+    return path_result, cost, collision, curr_wait_time
 
 def parallel_run(start, ox, oy, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION, g_list):
     with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:

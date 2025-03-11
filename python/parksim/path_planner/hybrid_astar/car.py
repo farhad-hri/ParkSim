@@ -77,6 +77,18 @@ def plot_arrow(x, y, yaw, ax, length=1.0, width=0.5, fc="r", ec="k"):
         ax.arrow(x, y, length * cos(yaw), length * sin(yaw),
                   fc=fc, ec=ec, head_width=width, head_length=width, alpha=0.4)
 
+def plot_arrow_return(x, y, yaw, ax, length=1.0, width=0.5, fc="r", ec="k"):
+    """Plot arrow."""
+    if not isinstance(x, float):
+        for (i_x, i_y, i_yaw) in zip(x, y, yaw):
+            plot_arrow(i_x, i_y, i_yaw, ax)
+    else:
+        # arrow_plot = ax.arrow(x, y, length * cos(yaw), length * sin(yaw),
+        #           fc=fc, ec=ec, head_width=width, head_length=width, alpha=0.4)
+        arrow_plot = ax.annotate("", xy=(x + length * cos(yaw), y + length * sin(yaw)),
+                                        xytext=(x, y), arrowprops=dict(arrowstyle="simple"))
+
+    return arrow_plot
 
 def plot_car(x, y, yaw, ax):
     car_color = '-g'
@@ -93,6 +105,25 @@ def plot_car(x, y, yaw, ax):
     plot_arrow(arrow_x, arrow_y, arrow_yaw, ax)
 
     ax.plot(car_outline_x, car_outline_y, car_color)
+
+def plot_car_return(x, y, yaw, ax):
+    car_color = '-g'
+    c, s = cos(yaw), sin(yaw)
+    rot = Rot.from_euler('z', -yaw).as_matrix()[0:2, 0:2]
+    car_outline_x, car_outline_y = [], []
+    for rx, ry in zip(VRX, VRY):
+        converted_xy = np.stack([rx, ry]).T @ rot
+        car_outline_x.append(converted_xy[0]+x)
+        car_outline_y.append(converted_xy[1]+y)
+
+    # arrow_x, arrow_y, arrow_yaw = c * 1.5 + x, s * 1.5 + y, yaw
+    arrow_x, arrow_y, arrow_yaw = x, y, yaw
+    arrow_plot = plot_arrow_return(arrow_x, arrow_y, arrow_yaw, ax)
+
+    car_plot, = ax.plot(car_outline_x, car_outline_y, car_color)
+
+    return car_plot, arrow_plot
+
 
 def plot_car_trans(x, y, yaw, ax):
     car_color = '-g'
@@ -142,6 +173,23 @@ def plot_other_car_trans(x, y, yaw, ax):
 
     ax.plot(car_outline_x, car_outline_y, car_color, alpha=0.2)
 
+def plot_other_car_return(x, y, yaw, ax):
+    car_color = '-r'
+    c, s = cos(yaw), sin(yaw)
+    rot = Rot.from_euler('z', -yaw).as_matrix()[0:2, 0:2]
+    car_outline_x, car_outline_y = [], []
+    for rx, ry in zip(VRX, VRY):
+        converted_xy = np.stack([rx, ry]).T @ rot
+        car_outline_x.append(converted_xy[0]+x)
+        car_outline_y.append(converted_xy[1]+y)
+
+    # arrow_x, arrow_y, arrow_yaw = c * 1.5 + x, s * 1.5 + y, yaw
+    arrow_x, arrow_y, arrow_yaw = x, y, yaw
+    arrow_plot = plot_arrow_return(arrow_x, arrow_y, arrow_yaw, ax)
+
+    car_plot, = ax.plot(car_outline_x, car_outline_y, car_color, alpha=0.5)
+
+    return car_plot, arrow_plot
 
 def pi_2_pi(angle):
     return (angle + pi) % (2 * pi) - pi

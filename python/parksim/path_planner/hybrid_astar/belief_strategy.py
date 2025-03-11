@@ -8,10 +8,13 @@ import time
 from scipy.spatial import cKDTree
 from matplotlib.patches import Rectangle, Circle
 import copy
+import multiprocessing
+from scipy.spatial.transform import Rotation as Rot
+from matplotlib.animation import FuncAnimation, FFMpegWriter
 
 from parksim.path_planner.hybrid_astar.hybrid_a_star import MOTION_RESOLUTION
-from parksim.path_planner.hybrid_astar.hybrid_a_star_parallel import map_lot, Car_class, hybrid_a_star_planning, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION, MOTION_RESOLUTION, PED_RAD
-from parksim.path_planner.hybrid_astar.car import plot_car, plot_other_car
+from parksim.path_planner.hybrid_astar.hybrid_a_star_parallel import map_lot, Car_class, evaluate_path, hybrid_a_star_planning, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION, MOTION_RESOLUTION, PED_RAD, MAX_WAIT_TIME
+from parksim.path_planner.hybrid_astar.car import plot_car, plot_other_car, plot_other_car_return, plot_car_return, VRX, VRY, plot_other_car_trans, plot_car_trans
 from parksim.path_planner.hybrid_astar.belief_pred_utils import occupancy_probability_multiple_spots_occ_dep
 
 def plot_ell(p, Car_obj, ax):
@@ -69,7 +72,7 @@ def rect_dist_obs_spots_plot(p, center_spots, Car_obj, ax):
     car = np.dot(rotationZ, car) # car is 2xN
 
     car1 = car + np.array([[p_x], [p_y]])  # (2xN) N are vertices
-    ax.plot(car1[0, :], car1[1, :], color='blue', alpha=0.5)
+    ax.plot(car1[0, :], car1[1, :], color='blue', alpha=0.2)
     ax.plot(p_x, p_y, linestyle='', marker='o', color='blue')
 
     return observed_spots
@@ -133,7 +136,9 @@ def get_occ_vac_spots(static_obs_kd_tree, dynamic_veh_state, ped_points, center_
     occ_spots_all = sorted(set(list(observed_spots[occ_spots_ind]))) # occupied by both static and dynamic agents
     vac_spots = sorted(list(set(observed_spots) - set(occ_spots_all)))
 
-    return occ_spots, vac_spots, occ_spots_veh_only, occ_spots_ped_only
+    occ_spots_dyn = occ_spots_veh_only + occ_spots_ped_only
+
+    return occ_spots, vac_spots, occ_spots_dyn, occ_spots_veh_only, occ_spots_ped_only
 
 def get_vertices_car(Car_obj, p):
     p_x = p[0]
@@ -151,6 +156,119 @@ def get_vertices_car(Car_obj, p):
 
     return car1[0, :].tolist(), car1[1, :].tolist()
 
+def parallel_run(start, ox, oy, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION, g_list):
+    with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
+        results = pool.starmap(hybrid_a_star_planning, [(start, goal, ox, oy, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION) for goal in g_list])
+    return results
+
+def plot_anim(ax, fig, p_all, dynamic_veh_path, ped_path):
+
+    # Define the update function for the animation
+    extend_end = 5
+    time_traj = np.arange(p_all.shape[0])
+    p_all = np.vstack((p_all, [p_all[-1]]*extend_end))
+    time_traj = np.hstack((time_traj, [time_traj[-1]]*extend_end))
+
+    end_time = int(time_traj[-1])
+    dynamic_veh_path = dynamic_veh_path[:, :end_time+1, :]
+    ped_path = ped_path[:, :end_time+1, :]
+
+    # Repeat the last index 5 times
+    last_time_repeated_veh = np.repeat(dynamic_veh_path[:, -1:, :], extend_end, axis=1)
+    # Concatenate along axis 1
+    dynamic_veh_path = np.concatenate([dynamic_veh_path, last_time_repeated_veh], axis=1)
+
+    # Repeat the last index 5 times
+    last_time_repeated_ped = np.repeat(ped_path[:, -1:, :], extend_end, axis=1)
+    # Concatenate along axis 1
+    ped_path = np.concatenate([ped_path, last_time_repeated_ped], axis=1)
+
+    dyn_cars = []
+    dyn_cars_arrow = []
+    for veh_i in range(dynamic_veh_path.shape[0]):
+        p_yaw = dynamic_veh_path[veh_i, 0, 2]
+        p_x = dynamic_veh_path[veh_i, 0, 0]
+        p_y = dynamic_veh_path[veh_i, 0, 1]
+        car_plot_d, arrow_plot_d = plot_other_car_return(p_x, p_y, p_yaw, ax)
+        dyn_cars.append(car_plot_d)
+        dyn_cars_arrow.append(arrow_plot_d)
+
+    ped = []
+    # plot pedestrians
+    for ped_i in range(ped_path.shape[0]):
+        circle = Circle((ped_path[ped_i, 0, 0], ped_path[ped_i, 0, 1]), radius=PED_RAD,
+                        facecolor='red', alpha=0.5)
+        ped.append(circle)
+        ax.add_artist(circle)
+
+    car_plot, arrow_plot = plot_car_return(p_all[0, 0], p_all[0, 1], p_all[0, 2], ax)
+
+    time_text = 't=' + str(time_traj[0])
+    props = dict(boxstyle='round', facecolor='w', alpha=0.5, edgecolor='black', linewidth=2)
+    text_t  = ax.text(2.5,30.5, time_text, fontsize=22, bbox=props)
+
+    def update(frame):
+
+        for veh_i in range(dynamic_veh_path.shape[0]):
+            p_yaw = dynamic_veh_path[veh_i, frame, 2]
+            p_x = dynamic_veh_path[veh_i, frame, 0]
+            p_y = dynamic_veh_path[veh_i, frame, 1]
+
+            rot = Rot.from_euler('z', -p_yaw).as_matrix()[0:2, 0:2]
+            car_outline_x, car_outline_y = [], []
+            for rx, ry in zip(VRX, VRY):
+                converted_xy = np.stack([rx, ry]).T @ rot
+                car_outline_x.append(converted_xy[0] + p_x)
+                car_outline_y.append(converted_xy[1] + p_y)
+
+            dyn_cars[veh_i].set_data(car_outline_x, car_outline_y)
+            dyn_cars_arrow[veh_i].xy = [p_x + 1 * np.cos(p_yaw), p_y + 1 * np.sin(p_yaw)]
+            dyn_cars_arrow[veh_i].set_position((p_x, p_y))
+
+        # plot pedestrians
+        for ped_i in range(ped_path.shape[0]):
+            ped[ped_i].center = (ped_path[ped_i, frame, 0], ped_path[ped_i, frame, 1],)
+
+        p_yaw = p_all[frame, 2]
+        p_x =  p_all[frame, 0]
+        p_y =  p_all[frame, 1]
+
+        rot = Rot.from_euler('z', -p_yaw).as_matrix()[0:2, 0:2]
+        car_outline_x, car_outline_y = [], []
+        for rx, ry in zip(VRX, VRY):
+            converted_xy = np.stack([rx, ry]).T @ rot
+            car_outline_x.append(converted_xy[0] + p_x)
+            car_outline_y.append(converted_xy[1] + p_y)
+
+        car_plot.set_data(car_outline_x, car_outline_y)
+        arrow_plot.xy = [p_x + 1 * np.cos(p_yaw), p_y + 1 * np.sin(p_yaw)]
+        arrow_plot.set_position((p_x, p_y))
+
+        text_t.set_text('t=' + str(time_traj[frame]))
+
+        # car = drawCar(Car_obj, x[frame], y[frame], yaw[frame])
+        # car_plot_a.set_data(car[0, :], car[1, :])
+        # arrow_plot_a.xy = [x[frame]+1*math.cos(yaw[frame]), y[frame]+1*math.sin(yaw[frame])]
+        # arrow_plot_a.set_position((x[frame], y[frame]))
+        # text_t.set_text('t=' + str(time_traj[frame]))
+        # for i in range(len(dynamic_plot_a)):
+        #     # Update circle positions
+        #     dynamic_plot_a[i].center = (obst_x[frame][i], obst_y[frame][i],)
+        # # dynamic_plot_a.set_data(obst_x[frame], obst_y[frame])
+
+        plot_list = dyn_cars + dyn_cars_arrow + [car_plot] + [arrow_plot] + [text_t] + ped
+        return plot_list
+
+    # Create the animation
+    ani = FuncAnimation(fig, update, frames=p_all.shape[0], blit=True, interval=500, repeat_delay = 1000)
+
+    save_file_name = 'Anim'
+    file_dir_anim =  save_file_name + '.mp4'
+    writer = FFMpegWriter(fps=10, metadata=dict(artist='Me'), bitrate=-1)
+    ani.save(file_dir_anim, writer=writer)
+
+    plt.show()
+
 type='big_lot'
 
 home_path = os.path.abspath(os.getcwd())
@@ -166,7 +284,9 @@ with open(config_path + 'config_map.json') as f:
 
 Car_obj = Car_class(config_planner)
 fig, ax = plt.subplots(figsize=(10, 8))
-x_min, x_max, y_min, y_max, p_w, p_l, l_w, n_r, n_s, n_s1, obstacleX, obstacleY, s, center_spots, occ_spot_indices = map_lot(type, config_map, Car_obj, ax)
+figa, axa = plt.subplots(figsize=(10, 8))
+axes = [ax, axa]
+x_min, x_max, y_min, y_max, p_w, p_l, l_w, n_r, n_s, n_s1, obstacleX, obstacleY, s, center_spots, occ_spot_indices = map_lot(type, config_map, Car_obj, axes)
 
 p = np.array(s)
 
@@ -176,6 +296,7 @@ dynamic_veh_0 = np.array([np.hstack((center_spots[29], np.deg2rad(0.0))),
                           np.hstack((center_spots[32] + np.array([-Car_obj.length/2-l_w/4, -l_w/2]), np.deg2rad(90.0)))
                           ])
 
+# center_spots[39] + np.array([-Car_obj.length/2 - l_w/4, p_w]), np.deg2rad(90.0)
 dynamic_veh_goal = np.array([np.hstack((center_spots[39] + np.array([-Car_obj.length/2 - l_w/4, p_w]), np.deg2rad(90.0))),
                              np.hstack((center_spots[35], np.deg2rad(0.0)))
                           ])
@@ -188,17 +309,17 @@ dynamic_veh_goal = np.array([np.hstack((center_spots[39] + np.array([-Car_obj.le
 #                              np.hstack((center_spots[35], np.deg2rad(0.0)))
 #                           ])
 
-dynamic_veh_parking = [1, 1]
-T = 30 # total number of time steps
-length_preds = T+1
+dynamic_veh_parking = [0, 1]
+T = 60 # total number of time steps to execute
+
+length_preds = 3*T+1 # availability of dynamic vehicle's predictions
 dynamic_veh_path = []
 ego_obst_x, ego_obst_y = get_vertices_car(Car_obj, p)
 obstacleX_dyn = obstacleX + ego_obst_x
 obstacleY_dyn = obstacleY + ego_obst_y
 for veh_i, veh_parking in enumerate(dynamic_veh_parking):
     if veh_parking:
-        ## dynamic_veh out of spot
-        path_veh = hybrid_a_star_planning(dynamic_veh_0[veh_i], dynamic_veh_goal[veh_i], obstacleX_dyn, obstacleY_dyn, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION)
+        path_veh = hybrid_a_star_planning(dynamic_veh_0[veh_i], dynamic_veh_goal[veh_i], obstacleX_dyn, obstacleY_dyn, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION)[0]
         if length_preds > len(path_veh.x_list):
             extra_time_steps = int(length_preds - len(path_veh.x_list))
             path_veh_n = np.array([path_veh.x_list, path_veh.y_list, path_veh.yaw_list]).T
@@ -208,15 +329,20 @@ for veh_i, veh_parking in enumerate(dynamic_veh_parking):
         else:
             path_veh_n = np.array([path_veh.x_list, path_veh.y_list, path_veh.yaw_list]).T
             path_veh_n = path_veh_n[:length_preds]
+    else:
+        ## dynamic_veh constant velocity
+        veh_0 = dynamic_veh_0[veh_i]
+        # straight_goal = dynamic_veh_0[0] + np.array([0.0, -15.0, 0.0])
+        path_veh_n = np.array([veh_0 + i * 0 for i in range(length_preds)])
 
     dynamic_veh_path.append(path_veh_n)
 
 dynamic_veh_path=np.array(dynamic_veh_path)
 
 # Pedestrian
-ped_0 = np.array([center_spots[20] + np.array([Car_obj.length/2-1, -Car_obj.width/2-1])
+ped_0 = np.array([center_spots[28] + np.array([Car_obj.length/2-1, -Car_obj.width/2-1])
                   ])
-ped_vel = np.array([[-0.9, -1.0]
+ped_vel = np.array([[-0.0, -0.0]
                     ])
 # time steps
 delay = 10 # should be less than or equal to T, length_preds = T+1
@@ -229,41 +355,203 @@ ped_path = np.array([np.vstack((ped_init[j], np.array([ped_0[j] + MOTION_RESOLUT
 static_xy = np.array([obstacleX, obstacleY]).T
 static_obs_kd_tree = cKDTree(static_xy)
 
-t=5
-T_pred = 5 # time steps
-dynamic_veh_path_t = dynamic_veh_path[:, t:t+T_pred+1]
-ped_path_t = ped_path[:, t:t+T_pred+1]
-
+t=0
 p = np.array(s)
 
-# plot_ell(s, Car_obj, ax)
-observed_spots = rect_dist_obs_spots_plot(p, center_spots, Car_obj, ax)
-print("Observed Spots: ", observed_spots)
-
-occ_spots, vac_spots, occ_spots_veh, occ_spots_ped = get_occ_vac_spots(static_obs_kd_tree, dynamic_veh_path_t[:, 0, :], ped_path_t[:, 0, :], center_spots, observed_spots, Car_obj, p_l, p_w)
-print(f"Occupied spots: {occ_spots}, Vacant Spots: {vac_spots}")
-print(f"Occupied by Vehicle: {occ_spots_veh}, Occupied by Pedestrian: {occ_spots_ped}")
-
-Sigma_0 = np.repeat(np.array([[[0.5*Car_obj.length, 0], [0, 0.5*Car_obj.width]]]), repeats=dynamic_veh_0.shape[0], axis=0)  # Covariance for each vehicle
-Sigma_0_ped = np.repeat(np.array([[[0.001*PED_RAD, 0], [0, 0.001*PED_RAD]]]), repeats=ped_0.shape[0], axis=0) # Covariance for each pedestrian
+Sigma_0 = np.repeat(np.array([[[0.5 * Car_obj.length, 0], [0, 0.5 * Car_obj.width]]]), repeats=dynamic_veh_0.shape[0],
+                    axis=0)  # Covariance for each vehicle
+Sigma_0_ped = np.repeat(np.array([[[0.0 * PED_RAD, 0], [0, 0.0 * PED_RAD]]]), repeats=ped_0.shape[0],
+                        axis=0)  # Covariance for each pedestrian
 Q = np.array([[0.5, 0], [0, 0.5]])  # Process noise (uncertainty growth)
 
-P_O_vacant, P_O_occ = occupancy_probability_multiple_spots_occ_dep(T_pred, dynamic_veh_path_t, ped_path_t, Sigma_0, Sigma_0_ped, Q, center_spots, vac_spots, occ_spots_veh, occ_spots_ped, Car_obj)
+wb_2 = Car_obj.wheelBase / 2
+p_all = [p]
+reached_spot = False
+while t < T and (not reached_spot):
+    T_pred = 5 # time steps
+    dynamic_veh_path_t = dynamic_veh_path[:, t:t+T_pred+1]
+    ped_path_t = ped_path[:, t:t+T_pred+1]
+
+    # plot_ell(s, Car_obj, ax)
+
+    observed_spots = rect_dist_obs_spots_plot(p, center_spots, Car_obj, ax)
+    # print("Observed Spots: ", observed_spots)
+
+    occ_spots, vac_spots, occ_spots_dyn, occ_spots_veh, occ_spots_ped = get_occ_vac_spots(static_obs_kd_tree, dynamic_veh_path_t[:, 0, :], ped_path_t[:, 0, :], center_spots, observed_spots, Car_obj, p_l, p_w)
+    # print(f"Occupied spots: {occ_spots}, Vacant Spots: {vac_spots}")
+    # print(f"Occupied by Vehicle: {occ_spots_veh}, Occupied by Pedestrian: {occ_spots_ped}")
+
+    P_O_vacant, P_O_occ = occupancy_probability_multiple_spots_occ_dep(T_pred, dynamic_veh_path_t, ped_path_t, Sigma_0, Sigma_0_ped, Q, center_spots, vac_spots, occ_spots_veh, occ_spots_ped, Car_obj)
+
+    ## Choose which spots to test for HA* paths
+    prob_thresh = 0.9
+    vacant_spots_vacant_ind = np.where(P_O_vacant[-1] <= prob_thresh)[0]
+    vacant_spots_vacant = np.array(vac_spots)[vacant_spots_vacant_ind]
+    vacant_spots_occ_ind = np.where(P_O_occ[-1] <= prob_thresh)[0]
+    vacant_spots_occ = np.array(occ_spots_dyn)[vacant_spots_occ_ind]
+
+    test_spots_ind = np.hstack((vacant_spots_vacant, vacant_spots_occ))
+    test_spots_center = center_spots[test_spots_ind.astype(int)]
+
+    goal_park_spots = []  # park_spot i ->  goal yaw = 0.0 if 0, and np.pi if 1 -> (x, y, yaw) of goal
+    for spot_xy in test_spots_center.tolist():
+        # transforming center of parking spot to rear axle of vehicle (goal x, y) with appropriate goal yaw
+        goal1 = np.array([spot_xy[0] - Car_obj.length / 2 + Car_obj.axleToBack, spot_xy[1], 0.0])
+        goal2 = np.array([spot_xy[0] + Car_obj.length / 2 - Car_obj.axleToBack, spot_xy[1], np.pi])
+        goal_spot_xy = [goal1, goal2]
+        goal_plot = goal1
+        goal_park_spots.append(goal_spot_xy)
+
+    goal_park_spots = list(chain.from_iterable(goal_park_spots))
+    # transforming to center of vehicle
+    g_list = [[g[0] + wb_2 * np.cos(g[2]), g[1] + wb_2 * np.sin(g[2]), g[2]] for g in goal_park_spots]
+
+    results_raw = parallel_run(p, obstacleX, obstacleY, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION, g_list)
+
+    results = [result[0] for result in results_raw if result[-1]]
+    print(f"State of ego: {p}, at time: {t}")
+
+    if t==3:
+        print("Stop!")
+    T_explore = 2
+
+    if results:
+        path_list = [[np.array([path.x_list, path.y_list, path.yaw_list]).T] for path in results]
+        longest_path_to_spot = max([len(path[0]) for path in path_list])
+        length_path_to_eval = int(max(T_pred, longest_path_to_spot) + MAX_WAIT_TIME / MOTION_RESOLUTION)
+
+        dynamic_veh_path_t_eval = dynamic_veh_path[:, t:t+length_path_to_eval]
+        ped_path_t_eval = ped_path[:, t:t+length_path_to_eval]
+
+        start_t_c = time.time()
+        costs = []
+        collisions = []
+        wait_times = []
+        path_eval = []
+        for path in path_list:
+            path_current, cost_current, collision_current, wait_time_current = evaluate_path(path[0], obstacleX, obstacleY, dynamic_veh_path_t_eval, ped_path_t_eval)
+            if collision_current:
+                costs.append(np.inf)
+            else:
+                costs.append(cost_current)
+            collisions.append(collision_current)
+            wait_times.append(wait_time_current)
+            path_eval.append(path_current)
+
+        # print("Comp time cost: ", time.time() - start_t_c)
+
+        if all(collisions):
+            # explore_y = np.min(center_spots[observed_spots, 1]) + 4.0
+            # explore_point = [p[0], explore_y, p[2]]
+            # results_raw = [hybrid_a_star_planning(p, explore_point, obstacleX, obstacleY, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION)]
+            # results = [result[0] for result in results_raw if result[-1]]
+            # straight_goal = dynamic_veh_0[0] + np.array([0.0, -15.0, 0.0])
+            path_list_ex = [[np.array([p + (i*MOTION_RESOLUTION) * np.array([0.0, -2.0, 0.0]) for i in range(int(T_explore/MOTION_RESOLUTION))])]]
+            if path_list_ex:
+                # path_list_ex = [[np.array([path.x_list, path.y_list, path.yaw_list]).T] for path in results]
+                longest_path_to_spot = max([len(path[0]) for path in path_list_ex])
+                length_path_to_eval = int(max(T_pred, longest_path_to_spot) + MAX_WAIT_TIME / MOTION_RESOLUTION)
+
+                dynamic_veh_path_t_eval = dynamic_veh_path[:, t:t + length_path_to_eval]
+                ped_path_t_eval = ped_path[:, t:t + length_path_to_eval]
+                costs_ex = []
+                collisions_ex = []
+                wait_times_ex = []
+                path_eval_ex = []
+                for path in path_list_ex:
+                    path_current, cost_current, collision_current, wait_time_current = evaluate_path(path[0], obstacleX, obstacleY,
+                                                                                       dynamic_veh_path_t_eval, ped_path_t_eval)
+                    costs_ex.append(cost_current)
+                    collisions_ex.append(collision_current)
+                    wait_times_ex.append(wait_time_current)
+                    path_eval_ex.append(path_current)
+
+                if not all(collisions_ex):
+                    print("Exploring")
+                    best_path_ex = path_eval_ex[np.argmin(costs_ex)]
+                    p_all = np.vstack((p_all, best_path_ex[1:]))
+                    t += best_path_ex.shape[0]-1
+                else:
+                    print("Stationary")
+                    p_all = np.vstack((p_all, p[None, :]))
+                    t += 1
+            else:
+                print("Stationary")
+                p_all = np.vstack((p_all, p[None, :]))
+                t += 1
+
+        else:
+            print("Go to spot")
+            best_path = path_eval[np.argmin(costs)]
+            p_all = np.vstack((p_all, best_path[1:]))
+            t += best_path.shape[0]-1
+
+    else:
+        # explore_y = np.min(center_spots[observed_spots, 1]) + 4.0
+        # explore_point = [p[0], explore_y, p[2]]
+        # results_raw = [hybrid_a_star_planning(p, explore_point, obstacleX, obstacleY, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION)]
+        # results = [result[0] for result in results_raw if result[-1]]
+        path_list_ex = [
+            [np.array([p + (i*MOTION_RESOLUTION) * np.array([0.0, -2.0, 0.0]) for i in range(int(T_explore/MOTION_RESOLUTION))])]]
+        if results:
+            path_list_ex = [[np.array([path.x_list, path.y_list, path.yaw_list]).T] for path in results]
+            longest_path_to_spot = max([len(path[0]) for path in path_list_ex])
+            length_path_to_eval = int(max(T_pred, longest_path_to_spot) + MAX_WAIT_TIME / MOTION_RESOLUTION)
+
+            dynamic_veh_path_t_eval = dynamic_veh_path[:, t:t + length_path_to_eval]
+            ped_path_t_eval = ped_path[:, t:t + length_path_to_eval]
+            costs_ex = []
+            collisions_ex = []
+            wait_times_ex = []
+            path_eval_ex = []
+            for path in path_list_ex:
+                cost_current, collision_current, wait_time_current = evaluate_path(path[0], obstacleX, obstacleY,
+                                                                                   dynamic_veh_path_t_eval,
+                                                                                   ped_path_t_eval)
+                costs_ex.append(cost_current)
+                collisions_ex.append(collision_current)
+                wait_times_ex.append(wait_time_current)
+                path_eval_ex.append(path_current)
+
+            if not all(collisions_ex):
+                print("Exploring")
+                best_path_ex = path_eval_ex[np.argmin(costs_ex)]
+                p_all = np.vstack((p_all, best_path_ex[1:]))
+                t += best_path_ex.shape[0]-1
+            else:
+                print("Stationary")
+                p_all = np.vstack((p_all, p[None, :]))
+                t += 1
+        else:
+            print("Stationary")
+            p_all = np.vstack((p_all, p[None, :]))
+            t += 1
+
+    p = p_all[-1]
+    if len(test_spots_ind):
+        reached_spot = np.min(np.linalg.norm(test_spots_center - p[None, :2], axis=1)) < 0.01
 
 # Plotting the dynamic agents
-for time_dynamic in range(T_pred+1):
+for time_dynamic in range(t+1):
     # plot vehicle
-    for veh_i in range(dynamic_veh_path_t.shape[0]):
-        p_yaw = dynamic_veh_path_t[veh_i, time_dynamic, 2]
-        p_x = dynamic_veh_path_t[veh_i, time_dynamic, 0]
-        p_y = dynamic_veh_path_t[veh_i, time_dynamic, 1]
-        plot_other_car(p_x, p_y, p_yaw, ax)
+    for veh_i in range(dynamic_veh_path.shape[0]):
+        p_yaw = dynamic_veh_path[veh_i, time_dynamic, 2]
+        p_x = dynamic_veh_path[veh_i, time_dynamic, 0]
+        p_y = dynamic_veh_path[veh_i, time_dynamic, 1]
+        plot_other_car_trans(p_x, p_y, p_yaw, ax)
 
     # plot pedestrians
-    for ped_i in range(ped_path_t.shape[0]):
-        circle = Circle((ped_path_t[ped_i, time_dynamic, 0], ped_path_t[ped_i, time_dynamic, 1]), radius=PED_RAD,
-                        facecolor='red', alpha=0.5)
+    for ped_i in range(ped_path.shape[0]):
+        circle = Circle((ped_path[ped_i, time_dynamic, 0], ped_path[ped_i, time_dynamic, 1]), radius=PED_RAD,
+                        facecolor='red', alpha=0.1)
         ax.add_artist(circle)
 
-ax.axis('equal')
+    plot_car_trans(p_all[time_dynamic, 0], p_all[time_dynamic, 1], p_all[time_dynamic, 2], ax)
+
+observed_spots = rect_dist_obs_spots_plot(p, center_spots, Car_obj, ax)
+for ax in axes:
+    ax.axis('equal')
+
+plot_anim(axa, figa, p_all, dynamic_veh_path, ped_path)
+
 plt.show()
