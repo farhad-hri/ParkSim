@@ -156,6 +156,46 @@ def get_vertices_car(Car_obj, p):
 
     return car1[0, :].tolist(), car1[1, :].tolist()
 
+def get_points_car(Car_obj, p):
+    p_x = p[0]
+    p_y = p[1]
+    p_yaw = p[2]
+    car = np.array(
+        [[-Car_obj.length/2, -Car_obj.length/2, Car_obj.length/2, Car_obj.length/2, -Car_obj.length/2],
+         [Car_obj.width / 2, -Car_obj.width / 2, -Car_obj.width / 2, Car_obj.width / 2, Car_obj.width / 2]])
+    car[0, :] = 1 * car[0, :]
+    car[1, :] = 1 * car[1, :]
+    rotationZ = np.array([[np.cos(p_yaw), -np.sin(p_yaw)],
+                          [np.sin(p_yaw), np.cos(p_yaw)]])
+    car = np.dot(rotationZ, car) # car is 2xN
+    car1 = car + np.array([[p_x], [p_y]])  # (2xN) N are vertices
+
+    obstacleX = []
+    obstacleY = []
+    ## Car
+    for i in range(car1.shape[1] - 1):
+        line = np.linspace(car1[:, i], car1[:, i + 1], num=10, endpoint=False)
+        obstacleX = obstacleX + line[:, 0].tolist()
+        obstacleY = obstacleY + line[:, 1].tolist()
+
+    return obstacleX, obstacleY
+
+def get_ped_points(PED_RAD, p):
+    p_x = p[0]
+    p_y = p[1]
+
+    angles = np.linspace(0, 2*np.pi, num=10)
+
+    obstacleX = []
+    obstacleY = []
+    ## Car
+    for i in range(angles.shape[0]):
+        obstacleX = obstacleX + [p_x + PED_RAD*np.cos(angles[i])]
+        obstacleY = obstacleY + [p_y + PED_RAD*np.sin(angles[i])]
+
+    return obstacleX, obstacleY
+
+
 def parallel_run(start, ox, oy, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION, g_list):
     with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
         results = pool.starmap(hybrid_a_star_planning, [(start, goal, ox, oy, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION) for goal in g_list])
@@ -312,6 +352,9 @@ dynamic_veh_goal = np.array([np.hstack((center_spots[39] + np.array([-Car_obj.le
 dynamic_veh_parking = [0, 1]
 T = 60 # total number of time steps to execute
 
+obstacleX_t = copy.deepcopy(obstacleX)
+obstacleY_t = copy.deepcopy(obstacleY)
+
 length_preds = 3*T+1 # availability of dynamic vehicle's predictions
 dynamic_veh_path = []
 ego_obst_x, ego_obst_y = get_vertices_car(Car_obj, p)
@@ -340,7 +383,7 @@ for veh_i, veh_parking in enumerate(dynamic_veh_parking):
 dynamic_veh_path=np.array(dynamic_veh_path)
 
 # Pedestrian
-ped_0 = np.array([center_spots[28] + np.array([Car_obj.length/2-1, -Car_obj.width/2-1])
+ped_0 = np.array([center_spots[28] + np.array([Car_obj.length/2-2, -Car_obj.width/2-1])
                   ])
 ped_vel = np.array([[-0.0, -0.0]
                     ])
@@ -368,9 +411,23 @@ wb_2 = Car_obj.wheelBase / 2
 p_all = [p]
 reached_spot = False
 while t < T and (not reached_spot):
+
     T_pred = 5 # time steps
     dynamic_veh_path_t = dynamic_veh_path[:, t:t+T_pred+1]
     ped_path_t = ped_path[:, t:t+T_pred+1]
+
+    obstacleX_t = copy.deepcopy(obstacleX)
+    obstacleY_t = copy.deepcopy(obstacleY)
+
+    # for veh_i in range(dynamic_veh_path_t.shape[0]):
+    #     dyn_X, dyn_Y = get_points_car(Car_obj, dynamic_veh_path_t[veh_i, 0])
+    #     obstacleX_t = obstacleX_t + dyn_X
+    #     obstacleY_t = obstacleY_t + dyn_Y
+
+    # for ped_i in range(ped_path_t.shape[0]):
+    #     dyn_X, dyn_Y = get_ped_points(PED_RAD, ped_path_t[ped_i, 0])
+    #     obstacleX_t = obstacleX_t + dyn_X
+    #     obstacleY_t = obstacleY_t + dyn_Y
 
     # plot_ell(s, Car_obj, ax)
 
@@ -384,7 +441,7 @@ while t < T and (not reached_spot):
     P_O_vacant, P_O_occ = occupancy_probability_multiple_spots_occ_dep(T_pred, dynamic_veh_path_t, ped_path_t, Sigma_0, Sigma_0_ped, Q, center_spots, vac_spots, occ_spots_veh, occ_spots_ped, Car_obj)
 
     ## Choose which spots to test for HA* paths
-    prob_thresh = 0.9
+    prob_thresh = 0.3
     vacant_spots_vacant_ind = np.where(P_O_vacant[-1] <= prob_thresh)[0]
     vacant_spots_vacant = np.array(vac_spots)[vacant_spots_vacant_ind]
     vacant_spots_occ_ind = np.where(P_O_occ[-1] <= prob_thresh)[0]
@@ -406,13 +463,13 @@ while t < T and (not reached_spot):
     # transforming to center of vehicle
     g_list = [[g[0] + wb_2 * np.cos(g[2]), g[1] + wb_2 * np.sin(g[2]), g[2]] for g in goal_park_spots]
 
-    results_raw = parallel_run(p, obstacleX, obstacleY, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION, g_list)
+    results_raw = parallel_run(p, obstacleX_t, obstacleY_t, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION, g_list)
 
     results = [result[0] for result in results_raw if result[-1]]
     print(f"State of ego: {p}, at time: {t}")
 
-    if t==3:
-        print("Stop!")
+    # if t==3:
+    #     print("Stop!")
     T_explore = 2
 
     if results:
@@ -429,7 +486,7 @@ while t < T and (not reached_spot):
         wait_times = []
         path_eval = []
         for path in path_list:
-            path_current, cost_current, collision_current, wait_time_current = evaluate_path(path[0], obstacleX, obstacleY, dynamic_veh_path_t_eval, ped_path_t_eval)
+            path_current, cost_current, collision_current, wait_time_current = evaluate_path(path[0], obstacleX_t, obstacleY_t, dynamic_veh_path_t_eval, ped_path_t_eval)
             if collision_current:
                 costs.append(np.inf)
             else:
@@ -459,7 +516,7 @@ while t < T and (not reached_spot):
                 wait_times_ex = []
                 path_eval_ex = []
                 for path in path_list_ex:
-                    path_current, cost_current, collision_current, wait_time_current = evaluate_path(path[0], obstacleX, obstacleY,
+                    path_current, cost_current, collision_current, wait_time_current = evaluate_path(path[0], obstacleX_t, obstacleY_t,
                                                                                        dynamic_veh_path_t_eval, ped_path_t_eval)
                     costs_ex.append(cost_current)
                     collisions_ex.append(collision_current)
@@ -505,7 +562,7 @@ while t < T and (not reached_spot):
             wait_times_ex = []
             path_eval_ex = []
             for path in path_list_ex:
-                cost_current, collision_current, wait_time_current = evaluate_path(path[0], obstacleX, obstacleY,
+                cost_current, collision_current, wait_time_current = evaluate_path(path[0], obstacleX_t, obstacleY_t,
                                                                                    dynamic_veh_path_t_eval,
                                                                                    ped_path_t_eval)
                 costs_ex.append(cost_current)

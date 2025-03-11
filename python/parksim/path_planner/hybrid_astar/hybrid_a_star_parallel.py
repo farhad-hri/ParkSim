@@ -43,7 +43,7 @@ N_STEER = 3  # number of steer command
 VR = 0.8  # robot radius
 
 # SB_COST = 100.0  # switch back penalty cost
-SB_COST = 1.0  # switch back penalty cost
+SB_COST = 10.0  # switch back penalty cost
 # BACK_COST = 5.0  # backward penalty cost
 BACK_COST = 1.0  # backward penalty cost
 # STEER_CHANGE_COST = 5.0  # steer angle change penalty cost
