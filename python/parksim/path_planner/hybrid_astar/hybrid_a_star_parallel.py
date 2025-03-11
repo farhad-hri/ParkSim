@@ -738,7 +738,8 @@ def evaluate_path(path_n, ox, oy, dynamic_veh_path, ped_path):
     # yaw_pos_to_pi = np.where(np.logical_and(path_n[:-1, 2] > 0,  np.abs(path_n[1:, 2] + np.pi) < 1e-6))[0]
     # path_n[yaw_pos_to_pi+1, 2] = np.pi
 
-    vel_norm = np.linalg.norm(vel, axis=1)
+    epsilon = 1e-4
+    vel_norm = np.maximum(np.linalg.norm(vel, axis=1), epsilon)
     zero_vel_ind =  np.where(vel_norm == 0)[0]
     vel_unit = vel / vel_norm[:, np.newaxis]
     vel_unit[np.isnan(vel_unit)] = 0.0
@@ -875,10 +876,10 @@ def parallel_cost(path_list, ox, oy):
         costs = pool.starmap(evaluate_path, [(path_1, ox, oy) for path_1 in path_list])
     return costs
 
-def parallel_ray(start, ox, oy, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION, g_list):
-    futures = [hybrid_a_star_planning.remote(start, goal, ox, oy, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION) for goal in g_list]
-    results = ray.get(futures)
-    return results
+# def parallel_ray(start, ox, oy, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION, g_list):
+#     futures = [hybrid_a_star_planning.remote(start, goal, ox, oy, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION) for goal in g_list]
+#     results = ray.get(futures)
+#     return results
 
 def with_multiprocessing(start, ox, oy, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION):
     print("Starting function with multiprocessing.")

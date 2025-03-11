@@ -314,7 +314,8 @@ type='big_lot'
 home_path = os.path.abspath(os.getcwd())
 
 ## Load the configuration files
-config_path = home_path + '/Config/'
+config_path = home_path + '/python/parksim/path_planner/hybrid_astar/Config/'
+# config_path = home_path + '/Config/'
 
 with open(config_path + 'config_planner.json') as f:
     config_planner = json.load(f)
@@ -349,7 +350,7 @@ dynamic_veh_goal = np.array([np.hstack((center_spots[39] + np.array([-Car_obj.le
 #                              np.hstack((center_spots[35], np.deg2rad(0.0)))
 #                           ])
 
-dynamic_veh_parking = [0, 1]
+dynamic_veh_parking = [0, 1] # 1 is parking/getting out using Hybrid A star, 0 is constant velocity/stationary
 T = 60 # total number of time steps to execute
 
 obstacleX_t = copy.deepcopy(obstacleX)
@@ -383,8 +384,9 @@ for veh_i, veh_parking in enumerate(dynamic_veh_parking):
 dynamic_veh_path=np.array(dynamic_veh_path)
 
 # Pedestrian
-ped_0 = np.array([center_spots[28] + np.array([Car_obj.length/2-2, -Car_obj.width/2-1])
-                  ])
+# ped_0 = np.array([center_spots[28] + np.array([Car_obj.length/2-1, -Car_obj.width/2-1])]) # ped_out
+# ped_0 = np.array([center_spots[28] + np.array([Car_obj.length/2-2, -Car_obj.width/2-1])]) # ped_in (0 velocity)
+ped_0 = np.array([np.array([-Car_obj.length/2-2, -Car_obj.width/2-1])]) # no_ped
 ped_vel = np.array([[-0.0, -0.0]
                     ])
 # time steps
@@ -398,9 +400,6 @@ ped_path = np.array([np.vstack((ped_init[j], np.array([ped_0[j] + MOTION_RESOLUT
 static_xy = np.array([obstacleX, obstacleY]).T
 static_obs_kd_tree = cKDTree(static_xy)
 
-t=0
-p = np.array(s)
-
 Sigma_0 = np.repeat(np.array([[[0.5 * Car_obj.length, 0], [0, 0.5 * Car_obj.width]]]), repeats=dynamic_veh_0.shape[0],
                     axis=0)  # Covariance for each vehicle
 Sigma_0_ped = np.repeat(np.array([[[0.0 * PED_RAD, 0], [0, 0.0 * PED_RAD]]]), repeats=ped_0.shape[0],
@@ -408,102 +407,165 @@ Sigma_0_ped = np.repeat(np.array([[[0.0 * PED_RAD, 0], [0, 0.0 * PED_RAD]]]), re
 Q = np.array([[0.5, 0], [0, 0.5]])  # Process noise (uncertainty growth)
 
 wb_2 = Car_obj.wheelBase / 2
-p_all = [p]
-reached_spot = False
-while t < T and (not reached_spot):
 
-    T_pred = 5 # time steps
-    dynamic_veh_path_t = dynamic_veh_path[:, t:t+T_pred+1]
-    ped_path_t = ped_path[:, t:t+T_pred+1]
+time_pred = []
+time_strat = []
+n_sims = 100
+for _ in range(n_sims):
 
-    obstacleX_t = copy.deepcopy(obstacleX)
-    obstacleY_t = copy.deepcopy(obstacleY)
+    t = 0
+    reached_spot = False
+    p = np.array(s)
+    p_all = [p]
 
-    # for veh_i in range(dynamic_veh_path_t.shape[0]):
-    #     dyn_X, dyn_Y = get_points_car(Car_obj, dynamic_veh_path_t[veh_i, 0])
-    #     obstacleX_t = obstacleX_t + dyn_X
-    #     obstacleY_t = obstacleY_t + dyn_Y
+    while t < T and (not reached_spot):
 
-    # for ped_i in range(ped_path_t.shape[0]):
-    #     dyn_X, dyn_Y = get_ped_points(PED_RAD, ped_path_t[ped_i, 0])
-    #     obstacleX_t = obstacleX_t + dyn_X
-    #     obstacleY_t = obstacleY_t + dyn_Y
+        T_pred = 5 # time steps
+        dynamic_veh_path_t = dynamic_veh_path[:, t:t+T_pred+1]
+        ped_path_t = ped_path[:, t:t+T_pred+1]
 
-    # plot_ell(s, Car_obj, ax)
+        obstacleX_t = copy.deepcopy(obstacleX)
+        obstacleY_t = copy.deepcopy(obstacleY)
 
-    observed_spots = rect_dist_obs_spots_plot(p, center_spots, Car_obj, ax)
-    # print("Observed Spots: ", observed_spots)
+        # for veh_i in range(dynamic_veh_path_t.shape[0]):
+        #     dyn_X, dyn_Y = get_points_car(Car_obj, dynamic_veh_path_t[veh_i, 0])
+        #     obstacleX_t = obstacleX_t + dyn_X
+        #     obstacleY_t = obstacleY_t + dyn_Y
 
-    occ_spots, vac_spots, occ_spots_dyn, occ_spots_veh, occ_spots_ped = get_occ_vac_spots(static_obs_kd_tree, dynamic_veh_path_t[:, 0, :], ped_path_t[:, 0, :], center_spots, observed_spots, Car_obj, p_l, p_w)
-    # print(f"Occupied spots: {occ_spots}, Vacant Spots: {vac_spots}")
-    # print(f"Occupied by Vehicle: {occ_spots_veh}, Occupied by Pedestrian: {occ_spots_ped}")
+        # for ped_i in range(ped_path_t.shape[0]):
+        #     dyn_X, dyn_Y = get_ped_points(PED_RAD, ped_path_t[ped_i, 0])
+        #     obstacleX_t = obstacleX_t + dyn_X
+        #     obstacleY_t = obstacleY_t + dyn_Y
 
-    P_O_vacant, P_O_occ = occupancy_probability_multiple_spots_occ_dep(T_pred, dynamic_veh_path_t, ped_path_t, Sigma_0, Sigma_0_ped, Q, center_spots, vac_spots, occ_spots_veh, occ_spots_ped, Car_obj)
+        # plot_ell(s, Car_obj, ax)
 
-    ## Choose which spots to test for HA* paths
-    prob_thresh = 0.3
-    vacant_spots_vacant_ind = np.where(P_O_vacant[-1] <= prob_thresh)[0]
-    vacant_spots_vacant = np.array(vac_spots)[vacant_spots_vacant_ind]
-    vacant_spots_occ_ind = np.where(P_O_occ[-1] <= prob_thresh)[0]
-    vacant_spots_occ = np.array(occ_spots_dyn)[vacant_spots_occ_ind]
+        observed_spots = rect_dist_obs_spots_plot(p, center_spots, Car_obj, ax)
+        # print("Observed Spots: ", observed_spots)
 
-    test_spots_ind = np.hstack((vacant_spots_vacant, vacant_spots_occ))
-    test_spots_center = center_spots[test_spots_ind.astype(int)]
+        occ_spots, vac_spots, occ_spots_dyn, occ_spots_veh, occ_spots_ped = get_occ_vac_spots(static_obs_kd_tree, dynamic_veh_path_t[:, 0, :], ped_path_t[:, 0, :], center_spots, observed_spots, Car_obj, p_l, p_w)
+        # print(f"Occupied spots: {occ_spots}, Vacant Spots: {vac_spots}")
+        # print(f"Occupied by Vehicle: {occ_spots_veh}, Occupied by Pedestrian: {occ_spots_ped}")
 
-    goal_park_spots = []  # park_spot i ->  goal yaw = 0.0 if 0, and np.pi if 1 -> (x, y, yaw) of goal
-    for spot_xy in test_spots_center.tolist():
-        # transforming center of parking spot to rear axle of vehicle (goal x, y) with appropriate goal yaw
-        goal1 = np.array([spot_xy[0] - Car_obj.length / 2 + Car_obj.axleToBack, spot_xy[1], 0.0])
-        goal2 = np.array([spot_xy[0] + Car_obj.length / 2 - Car_obj.axleToBack, spot_xy[1], np.pi])
-        goal_spot_xy = [goal1, goal2]
-        goal_plot = goal1
-        goal_park_spots.append(goal_spot_xy)
+        start_prob = time.time()
 
-    goal_park_spots = list(chain.from_iterable(goal_park_spots))
-    # transforming to center of vehicle
-    g_list = [[g[0] + wb_2 * np.cos(g[2]), g[1] + wb_2 * np.sin(g[2]), g[2]] for g in goal_park_spots]
+        P_O_vacant, P_O_occ = occupancy_probability_multiple_spots_occ_dep(T_pred, dynamic_veh_path_t, ped_path_t, Sigma_0, Sigma_0_ped, Q, center_spots, vac_spots, occ_spots_veh, occ_spots_ped, Car_obj)
 
-    results_raw = parallel_run(p, obstacleX_t, obstacleY_t, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION, g_list)
+        time_pred.append(time.time() - start_prob)
 
-    results = [result[0] for result in results_raw if result[-1]]
-    print(f"State of ego: {p}, at time: {t}")
+        ## Choose which spots to test for HA* paths
+        prob_thresh_vac = 0.7
+        vacant_spots_vacant_ind = np.where(P_O_vacant[-1] <= prob_thresh_vac)[0]
+        vacant_spots_vacant = np.array(vac_spots)[vacant_spots_vacant_ind]
+        prob_thresh_occ = 0.3
+        vacant_spots_occ_ind = np.where(P_O_occ[-1] <= prob_thresh_occ)[0]
+        vacant_spots_occ = np.array(occ_spots_dyn)[vacant_spots_occ_ind]
 
-    # if t==3:
-    #     print("Stop!")
-    T_explore = 2
+        test_spots_ind = np.hstack((vacant_spots_vacant, vacant_spots_occ))
+        test_spots_center = center_spots[test_spots_ind.astype(int)]
 
-    if results:
-        path_list = [[np.array([path.x_list, path.y_list, path.yaw_list]).T] for path in results]
-        longest_path_to_spot = max([len(path[0]) for path in path_list])
-        length_path_to_eval = int(max(T_pred, longest_path_to_spot) + MAX_WAIT_TIME / MOTION_RESOLUTION)
+        goal_park_spots = []  # park_spot i ->  goal yaw = 0.0 if 0, and np.pi if 1 -> (x, y, yaw) of goal
+        for spot_xy in test_spots_center.tolist():
+            # transforming center of parking spot to rear axle of vehicle (goal x, y) with appropriate goal yaw
+            goal1 = np.array([spot_xy[0] - Car_obj.length / 2 + Car_obj.axleToBack, spot_xy[1], 0.0])
+            goal2 = np.array([spot_xy[0] + Car_obj.length / 2 - Car_obj.axleToBack, spot_xy[1], np.pi])
+            goal_spot_xy = [goal1, goal2]
+            goal_plot = goal1
+            goal_park_spots.append(goal_spot_xy)
 
-        dynamic_veh_path_t_eval = dynamic_veh_path[:, t:t+length_path_to_eval]
-        ped_path_t_eval = ped_path[:, t:t+length_path_to_eval]
+        goal_park_spots = list(chain.from_iterable(goal_park_spots))
+        # transforming to center of vehicle
+        g_list = [[g[0] + wb_2 * np.cos(g[2]), g[1] + wb_2 * np.sin(g[2]), g[2]] for g in goal_park_spots]
 
-        start_t_c = time.time()
-        costs = []
-        collisions = []
-        wait_times = []
-        path_eval = []
-        for path in path_list:
-            path_current, cost_current, collision_current, wait_time_current = evaluate_path(path[0], obstacleX_t, obstacleY_t, dynamic_veh_path_t_eval, ped_path_t_eval)
-            if collision_current:
-                costs.append(np.inf)
+        start_strat = time.time()
+
+        results_raw = parallel_run(p, obstacleX_t, obstacleY_t, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION, g_list)
+
+        results = [result[0] for result in results_raw if result[-1]]
+        # print(f"State of ego: {p}, at time: {t}")
+
+        # if t>=4:
+        #     print("Stop!")
+
+        T_explore = 2
+
+        if results:
+            path_list = [[np.array([path.x_list, path.y_list, path.yaw_list]).T] for path in results]
+            longest_path_to_spot = max([len(path[0]) for path in path_list])
+            length_path_to_eval = int(max(T_pred, longest_path_to_spot) + MAX_WAIT_TIME / MOTION_RESOLUTION)
+
+            dynamic_veh_path_t_eval = dynamic_veh_path[:, t:t+length_path_to_eval]
+            ped_path_t_eval = ped_path[:, t:t+length_path_to_eval]
+
+            start_t_c = time.time()
+            costs = []
+            collisions = []
+            wait_times = []
+            path_eval = []
+            for path in path_list:
+                path_current, cost_current, collision_current, wait_time_current = evaluate_path(path[0], obstacleX_t, obstacleY_t, dynamic_veh_path_t_eval, ped_path_t_eval)
+                if collision_current:
+                    costs.append(np.inf)
+                else:
+                    costs.append(cost_current)
+                collisions.append(collision_current)
+                wait_times.append(wait_time_current)
+                path_eval.append(path_current)
+
+            # print("Comp time cost: ", time.time() - start_t_c)
+
+            if all(collisions):
+                # explore_y = np.min(center_spots[observed_spots, 1]) + 4.0
+                # explore_point = [p[0], explore_y, p[2]]
+                # results_raw = [hybrid_a_star_planning(p, explore_point, obstacleX, obstacleY, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION)]
+                # results = [result[0] for result in results_raw if result[-1]]
+                # straight_goal = dynamic_veh_0[0] + np.array([0.0, -15.0, 0.0])
+                path_list_ex = [[np.array([p + (i*MOTION_RESOLUTION) * np.array([0.0, -2.0, 0.0]) for i in range(int(T_explore/MOTION_RESOLUTION))])]]
+                if path_list_ex:
+                    # path_list_ex = [[np.array([path.x_list, path.y_list, path.yaw_list]).T] for path in results]
+                    longest_path_to_spot = max([len(path[0]) for path in path_list_ex])
+                    length_path_to_eval = int(max(T_pred, longest_path_to_spot) + MAX_WAIT_TIME / MOTION_RESOLUTION)
+
+                    dynamic_veh_path_t_eval = dynamic_veh_path[:, t:t + length_path_to_eval]
+                    ped_path_t_eval = ped_path[:, t:t + length_path_to_eval]
+                    costs_ex = []
+                    collisions_ex = []
+                    wait_times_ex = []
+                    path_eval_ex = []
+                    for path in path_list_ex:
+                        path_current, cost_current, collision_current, wait_time_current = evaluate_path(path[0], obstacleX_t, obstacleY_t,
+                                                                                            dynamic_veh_path_t_eval, ped_path_t_eval)
+                        costs_ex.append(cost_current)
+                        collisions_ex.append(collision_current)
+                        wait_times_ex.append(wait_time_current)
+                        path_eval_ex.append(path_current)
+
+                    if not all(collisions_ex):
+                        # print("Exploring")
+                        best_path_ex = path_eval_ex[np.argmin(costs_ex)]
+                        p_all = np.vstack((p_all, best_path_ex[1:]))
+                        t += best_path_ex.shape[0]-1
+                    else:
+                        # print("Stationary")
+                        p_all = np.vstack((p_all, p[None, :]))
+                        t += 1
+                else:
+                    # print("Stationary")
+                    p_all = np.vstack((p_all, p[None, :]))
+                    t += 1
+
             else:
-                costs.append(cost_current)
-            collisions.append(collision_current)
-            wait_times.append(wait_time_current)
-            path_eval.append(path_current)
+                # print("Go to spot")
+                best_path = path_eval[np.argmin(costs)]
+                p_all = np.vstack((p_all, best_path[1:]))
+                t += best_path.shape[0]-1
 
-        # print("Comp time cost: ", time.time() - start_t_c)
-
-        if all(collisions):
+        else:
             # explore_y = np.min(center_spots[observed_spots, 1]) + 4.0
             # explore_point = [p[0], explore_y, p[2]]
             # results_raw = [hybrid_a_star_planning(p, explore_point, obstacleX, obstacleY, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION)]
             # results = [result[0] for result in results_raw if result[-1]]
-            # straight_goal = dynamic_veh_0[0] + np.array([0.0, -15.0, 0.0])
-            path_list_ex = [[np.array([p + (i*MOTION_RESOLUTION) * np.array([0.0, -2.0, 0.0]) for i in range(int(T_explore/MOTION_RESOLUTION))])]]
+            path_list_ex = [
+                [np.array([p + (i*MOTION_RESOLUTION) * np.array([0.0, -2.0, 0.0]) for i in range(int(T_explore/MOTION_RESOLUTION))])]]
             if path_list_ex:
                 # path_list_ex = [[np.array([path.x_list, path.y_list, path.yaw_list]).T] for path in results]
                 longest_path_to_spot = max([len(path[0]) for path in path_list_ex])
@@ -517,77 +579,35 @@ while t < T and (not reached_spot):
                 path_eval_ex = []
                 for path in path_list_ex:
                     path_current, cost_current, collision_current, wait_time_current = evaluate_path(path[0], obstacleX_t, obstacleY_t,
-                                                                                       dynamic_veh_path_t_eval, ped_path_t_eval)
+                                                                                        dynamic_veh_path_t_eval,
+                                                                                        ped_path_t_eval)
                     costs_ex.append(cost_current)
                     collisions_ex.append(collision_current)
                     wait_times_ex.append(wait_time_current)
                     path_eval_ex.append(path_current)
 
                 if not all(collisions_ex):
-                    print("Exploring")
+                    # print("Exploring")
                     best_path_ex = path_eval_ex[np.argmin(costs_ex)]
                     p_all = np.vstack((p_all, best_path_ex[1:]))
                     t += best_path_ex.shape[0]-1
                 else:
-                    print("Stationary")
+                    # print("Stationary")
                     p_all = np.vstack((p_all, p[None, :]))
                     t += 1
             else:
-                print("Stationary")
+                # print("Stationary")
                 p_all = np.vstack((p_all, p[None, :]))
                 t += 1
 
-        else:
-            print("Go to spot")
-            best_path = path_eval[np.argmin(costs)]
-            p_all = np.vstack((p_all, best_path[1:]))
-            t += best_path.shape[0]-1
+        time_strat.append(time.time() - start_prob)
 
-    else:
-        # explore_y = np.min(center_spots[observed_spots, 1]) + 4.0
-        # explore_point = [p[0], explore_y, p[2]]
-        # results_raw = [hybrid_a_star_planning(p, explore_point, obstacleX, obstacleY, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION)]
-        # results = [result[0] for result in results_raw if result[-1]]
-        path_list_ex = [
-            [np.array([p + (i*MOTION_RESOLUTION) * np.array([0.0, -2.0, 0.0]) for i in range(int(T_explore/MOTION_RESOLUTION))])]]
-        if results:
-            path_list_ex = [[np.array([path.x_list, path.y_list, path.yaw_list]).T] for path in results]
-            longest_path_to_spot = max([len(path[0]) for path in path_list_ex])
-            length_path_to_eval = int(max(T_pred, longest_path_to_spot) + MAX_WAIT_TIME / MOTION_RESOLUTION)
+        p = p_all[-1]
+        if len(test_spots_ind):
+            reached_spot = np.min(np.linalg.norm(test_spots_center - p[None, :2], axis=1)) < 0.01
 
-            dynamic_veh_path_t_eval = dynamic_veh_path[:, t:t + length_path_to_eval]
-            ped_path_t_eval = ped_path[:, t:t + length_path_to_eval]
-            costs_ex = []
-            collisions_ex = []
-            wait_times_ex = []
-            path_eval_ex = []
-            for path in path_list_ex:
-                cost_current, collision_current, wait_time_current = evaluate_path(path[0], obstacleX_t, obstacleY_t,
-                                                                                   dynamic_veh_path_t_eval,
-                                                                                   ped_path_t_eval)
-                costs_ex.append(cost_current)
-                collisions_ex.append(collision_current)
-                wait_times_ex.append(wait_time_current)
-                path_eval_ex.append(path_current)
-
-            if not all(collisions_ex):
-                print("Exploring")
-                best_path_ex = path_eval_ex[np.argmin(costs_ex)]
-                p_all = np.vstack((p_all, best_path_ex[1:]))
-                t += best_path_ex.shape[0]-1
-            else:
-                print("Stationary")
-                p_all = np.vstack((p_all, p[None, :]))
-                t += 1
-        else:
-            print("Stationary")
-            p_all = np.vstack((p_all, p[None, :]))
-            t += 1
-
-    p = p_all[-1]
-    if len(test_spots_ind):
-        reached_spot = np.min(np.linalg.norm(test_spots_center - p[None, :2], axis=1)) < 0.01
-
+print(f"Mean - Time for belief predictions: {np.mean(time_pred)}, Time for Strategy Planner: {np.mean(time_strat)}")
+print(f"STD - Time for belief predictions: {np.std(time_pred)}, Time for Strategy Planner: {np.std(time_strat)}")
 # Plotting the dynamic agents
 for time_dynamic in range(t+1):
     # plot vehicle
