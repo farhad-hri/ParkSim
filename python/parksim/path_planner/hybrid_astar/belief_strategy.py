@@ -323,6 +323,7 @@ with open(config_path + 'config_planner.json') as f:
 with open(config_path + 'config_map.json') as f:
     config_map = json.load(f)
 
+goal_thresh = config_planner['goal_thresh_pos']
 Car_obj = Car_class(config_planner)
 fig, ax = plt.subplots(figsize=(10, 8))
 figa, axa = plt.subplots(figsize=(10, 8))
@@ -474,10 +475,10 @@ for _ in range(n_sims):
 
         goal_park_spots = list(chain.from_iterable(goal_park_spots))
         # transforming to center of vehicle
-        g_list = [[g[0] + wb_2 * np.cos(g[2]), g[1] + wb_2 * np.sin(g[2]), g[2]] for g in goal_park_spots]
+        g_list = [[g[0] + wb_2 * np.cos(g[2]), g[1] + wb_2 * np.sin(g[2]), g[2]] for g in goal_park_spots]        
+
 
         start_strat = time.time()
-
         results_raw = parallel_run(p, obstacleX_t, obstacleY_t, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION, g_list)
 
         results = [result[0] for result in results_raw if result[-1]]
@@ -489,8 +490,8 @@ for _ in range(n_sims):
         T_explore = 2
 
         if results:
-            path_list = [[np.array([path.x_list, path.y_list, path.yaw_list]).T] for path in results]
-            longest_path_to_spot = max([len(path[0]) for path in path_list])
+            path_list = [np.array([path.x_list, path.y_list, path.yaw_list]).T for path in results]
+            longest_path_to_spot = max([len(path) for path in path_list])
             length_path_to_eval = int(max(T_pred, longest_path_to_spot) + MAX_WAIT_TIME / MOTION_RESOLUTION)
 
             dynamic_veh_path_t_eval = dynamic_veh_path[:, t:t+length_path_to_eval]
@@ -502,7 +503,7 @@ for _ in range(n_sims):
             wait_times = []
             path_eval = []
             for path in path_list:
-                path_current, cost_current, collision_current, wait_time_current = evaluate_path(path[0], obstacleX_t, obstacleY_t, dynamic_veh_path_t_eval, ped_path_t_eval)
+                path_current, cost_current, collision_current, wait_time_current = evaluate_path(path, obstacleX_t, obstacleY_t, dynamic_veh_path_t_eval, ped_path_t_eval)
                 if collision_current:
                     costs.append(np.inf)
                 else:
@@ -519,10 +520,10 @@ for _ in range(n_sims):
                 # results_raw = [hybrid_a_star_planning(p, explore_point, obstacleX, obstacleY, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION)]
                 # results = [result[0] for result in results_raw if result[-1]]
                 # straight_goal = dynamic_veh_0[0] + np.array([0.0, -15.0, 0.0])
-                path_list_ex = [[np.array([p + (i*MOTION_RESOLUTION) * np.array([0.0, -2.0, 0.0]) for i in range(int(T_explore/MOTION_RESOLUTION))])]]
+                path_list_ex = [np.array([p + (i*MOTION_RESOLUTION) * np.array([0.0, -2.0, 0.0]) for i in range(int(T_explore/MOTION_RESOLUTION))])]
                 if path_list_ex:
                     # path_list_ex = [[np.array([path.x_list, path.y_list, path.yaw_list]).T] for path in results]
-                    longest_path_to_spot = max([len(path[0]) for path in path_list_ex])
+                    longest_path_to_spot = max([len(path) for path in path_list_ex])
                     length_path_to_eval = int(max(T_pred, longest_path_to_spot) + MAX_WAIT_TIME / MOTION_RESOLUTION)
 
                     dynamic_veh_path_t_eval = dynamic_veh_path[:, t:t + length_path_to_eval]
@@ -532,7 +533,7 @@ for _ in range(n_sims):
                     wait_times_ex = []
                     path_eval_ex = []
                     for path in path_list_ex:
-                        path_current, cost_current, collision_current, wait_time_current = evaluate_path(path[0], obstacleX_t, obstacleY_t,
+                        path_current, cost_current, collision_current, wait_time_current = evaluate_path(path, obstacleX_t, obstacleY_t,
                                                                                             dynamic_veh_path_t_eval, ped_path_t_eval)
                         costs_ex.append(cost_current)
                         collisions_ex.append(collision_current)
@@ -564,11 +565,10 @@ for _ in range(n_sims):
             # explore_point = [p[0], explore_y, p[2]]
             # results_raw = [hybrid_a_star_planning(p, explore_point, obstacleX, obstacleY, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION)]
             # results = [result[0] for result in results_raw if result[-1]]
-            path_list_ex = [
-                [np.array([p + (i*MOTION_RESOLUTION) * np.array([0.0, -2.0, 0.0]) for i in range(int(T_explore/MOTION_RESOLUTION))])]]
+            path_list_ex = [np.array([p + (i*MOTION_RESOLUTION) * np.array([0.0, -2.0, 0.0]) for i in range(int(T_explore/MOTION_RESOLUTION))])]
             if path_list_ex:
                 # path_list_ex = [[np.array([path.x_list, path.y_list, path.yaw_list]).T] for path in results]
-                longest_path_to_spot = max([len(path[0]) for path in path_list_ex])
+                longest_path_to_spot = max([len(path) for path in path_list_ex])
                 length_path_to_eval = int(max(T_pred, longest_path_to_spot) + MAX_WAIT_TIME / MOTION_RESOLUTION)
 
                 dynamic_veh_path_t_eval = dynamic_veh_path[:, t:t + length_path_to_eval]
@@ -578,7 +578,7 @@ for _ in range(n_sims):
                 wait_times_ex = []
                 path_eval_ex = []
                 for path in path_list_ex:
-                    path_current, cost_current, collision_current, wait_time_current = evaluate_path(path[0], obstacleX_t, obstacleY_t,
+                    path_current, cost_current, collision_current, wait_time_current = evaluate_path(path, obstacleX_t, obstacleY_t,
                                                                                         dynamic_veh_path_t_eval,
                                                                                         ped_path_t_eval)
                     costs_ex.append(cost_current)
@@ -600,11 +600,11 @@ for _ in range(n_sims):
                 p_all = np.vstack((p_all, p[None, :]))
                 t += 1
 
-        time_strat.append(time.time() - start_prob)
 
+        time_strat.append(time.time() - start_strat)
         p = p_all[-1]
         if len(test_spots_ind):
-            reached_spot = np.min(np.linalg.norm(test_spots_center - p[None, :2], axis=1)) < 0.01
+            reached_spot = np.min(np.linalg.norm(test_spots_center - p[None, :2], axis=1)) < goal_thresh
 
 print(f"Mean - Time for belief predictions: {np.mean(time_pred)}, Time for Strategy Planner: {np.mean(time_strat)}")
 print(f"STD - Time for belief predictions: {np.std(time_pred)}, Time for Strategy Planner: {np.std(time_strat)}")
