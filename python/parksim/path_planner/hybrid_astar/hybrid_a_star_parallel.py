@@ -542,6 +542,7 @@ def map_lot(type, config_map, Car_obj, axes):
     # maximum at middle of the sequence of rows
     p_start_all = [p_min + (i/n_r)*(0.5 - p_min) for i in range(n_r)] + [0.5 - ((i+1)/n_r)*(0.5 - p_min) for i in range(n_r)]
 
+    prob_all_spots = []
     for row_split_i in range(int(2*n_r)):
         # probability of occupancy
         p_start = p_start_all[row_split_i]
@@ -561,6 +562,18 @@ def map_lot(type, config_map, Car_obj, axes):
         p_yaw = yaw_r[row_split_i%2]
 
         obstacleX, obstacleY, center_spots = map_lot_place_cars(p_x, p_y, p_yaw, indices, Car_obj, p_w, n_s1, obstacleX, obstacleY, center_spots, axes)
+        
+        prob_all_spots.append(p_vertical)
+
+    ## Plot occupancy probabilities
+    prob_all_spots_n = np.array(prob_all_spots)
+    figp, axp = plt.subplots()
+    im = axp.imshow(prob_all_spots_n.T, origin='lower')
+    axp.set_xticks(np.arange(int(2*n_r)))
+    axp.set_yticks(np.arange(n_s1))
+    axp.tick_params(axis='both', which='major', labelsize=20)
+    cbar = figp.colorbar(im)
+    cbar.ax.tick_params(labelsize=20)
 
     for ax in axes:
         ax.plot([x_min, x_max, x_max, x_min, x_min], [y_min, y_min, y_max, y_max, y_min], color='black')

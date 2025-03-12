@@ -411,7 +411,7 @@ wb_2 = Car_obj.wheelBase / 2
 
 time_pred = []
 time_strat = []
-n_sims = 100
+n_sims = 1
 for _ in range(n_sims):
 
     t = 0
