@@ -377,7 +377,6 @@ for veh_i, veh_parking in enumerate(dynamic_veh_parking):
     else:
         ## dynamic_veh constant velocity
         veh_0 = dynamic_veh_0[veh_i]
-        # straight_goal = dynamic_veh_0[0] + np.array([0.0, -15.0, 0.0])
         path_veh_n = np.array([veh_0 + i * 0 for i in range(length_preds)])
 
     dynamic_veh_path.append(path_veh_n)
@@ -386,8 +385,8 @@ dynamic_veh_path=np.array(dynamic_veh_path)
 
 # Pedestrian
 # ped_0 = np.array([center_spots[28] + np.array([Car_obj.length/2-1, -Car_obj.width/2-1])]) # ped_out
-# ped_0 = np.array([center_spots[28] + np.array([Car_obj.length/2-2, -Car_obj.width/2-1])]) # ped_in (0 velocity)
-ped_0 = np.array([np.array([-Car_obj.length/2-2, -Car_obj.width/2-1])]) # no_ped
+ped_0 = np.array([center_spots[28] + np.array([Car_obj.length/2-2, -Car_obj.width/2-1])]) # ped_in (0 velocity)
+# ped_0 = np.array([np.array([-Car_obj.length/2-2, -Car_obj.width/2-1])]) # no_ped
 ped_vel = np.array([[-0.0, -0.0]
                     ])
 # time steps
@@ -454,10 +453,10 @@ for _ in range(n_sims):
         time_pred.append(time.time() - start_prob)
 
         ## Choose which spots to test for HA* paths
-        prob_thresh_vac = 0.7
+        prob_thresh_vac = 0.3
         vacant_spots_vacant_ind = np.where(P_O_vacant[-1] <= prob_thresh_vac)[0]
         vacant_spots_vacant = np.array(vac_spots)[vacant_spots_vacant_ind]
-        prob_thresh_occ = 0.3
+        prob_thresh_occ = 0.7
         vacant_spots_occ_ind = np.where(P_O_occ[-1] <= prob_thresh_occ)[0]
         vacant_spots_occ = np.array(occ_spots_dyn)[vacant_spots_occ_ind]
 
@@ -475,8 +474,7 @@ for _ in range(n_sims):
 
         goal_park_spots = list(chain.from_iterable(goal_park_spots))
         # transforming to center of vehicle
-        g_list = [[g[0] + wb_2 * np.cos(g[2]), g[1] + wb_2 * np.sin(g[2]), g[2]] for g in goal_park_spots]        
-
+        g_list = [[g[0] + wb_2 * np.cos(g[2]), g[1] + wb_2 * np.sin(g[2]), g[2]] for g in goal_park_spots]
 
         start_strat = time.time()
         results_raw = parallel_run(p, obstacleX_t, obstacleY_t, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION, g_list)
