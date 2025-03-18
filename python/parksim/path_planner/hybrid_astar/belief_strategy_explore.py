@@ -17,6 +17,7 @@ from parksim.path_planner.hybrid_astar.hybrid_a_star_parallel import map_lot, Ca
 from parksim.path_planner.hybrid_astar.car import plot_car, plot_other_car, plot_other_car_return, plot_car_return, VRX, VRY, plot_other_car_trans, plot_car_trans
 from parksim.path_planner.hybrid_astar.belief_pred_utils import occupancy_probability_multiple_spots_occ_dep
 
+
 def plot_ell(p, Car_obj, ax):
     beta_l = 14
     beta_w = 17
@@ -46,7 +47,49 @@ def plot_ell(p, Car_obj, ax):
     ax.plot(x_rotated, y_rotated, color='red', alpha=0.5)
     ax.plot(p_x, p_y, linestyle='', marker='o', color='red')  # center of ellipse
 
-def rect_dist_obs_spots_plot(p, center_spots, roads, roads_y, Car_obj, ax):
+def valid_point(p, map_limits):
+    x_min, x_max, y_min, y_max = map_limits
+    if p[0] <= x_min or p[0] >= x_max or p[1] <= y_min or p[1] >= y_max:
+        return False
+    return True
+
+def spline_inter(start, goal):
+    x0, y0, theta0 = start[0], start[1], start[2]
+    x_f, y_f, theta_f = goal[0], goal[1], goal[2]
+    # Compute derivatives from headings
+    vx0, vy0 = np.cos(theta0), np.sin(theta0)
+    vx_f, vy_f = np.cos(theta_f), np.sin(theta_f)
+
+    # Set up equations for cubic polynomial: a*t^3 + b*t^2 + c*t + d
+    A = np.array([
+        [0, 0, 0, 1],
+        [1, 1, 1, 1],
+        [0, 0, 1, 0],
+        [3, 2, 1, 0]
+    ])
+
+    bx = np.array([x0, x_f, vx0, vx_f])
+    by = np.array([y0, y_f, vy0, vy_f])
+
+    # Solve for coefficients
+    coeff_x = np.linalg.solve(A, bx)
+    coeff_y = np.linalg.solve(A, by)
+
+    # Generate the spline trajectory
+    T = np.linspace(0, 1, 10)
+    X = coeff_x[0]*T**3 + coeff_x[1]*T**2 + coeff_x[2]*T + coeff_x[3]
+    Y = coeff_y[0]*T**3 + coeff_y[1]*T**2 + coeff_y[2]*T + coeff_y[3]
+
+    # Compute derivatives for heading
+    dX = 3 * coeff_x[0] * T**2 + 2 * coeff_x[1] * T + coeff_x[2]
+    dY = 3 * coeff_y[0] * T**2 + 2 * coeff_y[1] * T + coeff_y[2]
+
+    # Compute heading at each time step
+    headings = np.arctan2(dY, dX)
+
+    return X, Y, headings
+
+def rect_dist_obs_spots_plot(p, center_spots, roads, roads_y, map_limits, Car_obj, ax):
     d = Car_obj.length
     p_x = p[0] + d * np.cos(p[2])
     p_y = p[1] + d * np.sin(p[2])
@@ -97,6 +140,9 @@ def rect_dist_obs_spots_plot(p, center_spots, roads, roads_y, Car_obj, ax):
     explore_points[:, :2] = np.dot(explore_points[:, :2], rotationZ.T) # rotate the frame (from ego's heading to global frame)
     explore_points[:, :2] = explore_points[:, :2] + np.array([p[0], p[1]]) # translate the frame (from ego's center to global frame)
 
+    explore_points_final = np.array([explore_points[i] for i in range(explore_points.shape[0]) 
+                                     if valid_point(explore_points[i], map_limits)])
+
     ## plot the 1 distance rectangle
     car = np.array(
         [[-Car_obj.length/2, -Car_obj.length/2, Car_obj.length/2, Car_obj.length/2, -Car_obj.length/2],
@@ -108,9 +154,9 @@ def rect_dist_obs_spots_plot(p, center_spots, roads, roads_y, Car_obj, ax):
     car1 = car + np.array([[p_x], [p_y]])  # (2xN) N are vertices
     ax.plot(car1[0, :], car1[1, :], color='blue', alpha=0.2)
     ax.plot(p_x, p_y, linestyle='', marker='o', color='blue')
-    ax.plot(explore_points[:, 0], explore_points[:, 1], linestyle='', marker='o', color='green')
+    ax.plot(explore_points_final[:, 0], explore_points_final[:, 1], linestyle='', marker='o', color='green')
 
-    return observed_spots, explore_points
+    return observed_spots, explore_points_final
 
 def get_occ_vac_spots(static_obs_kd_tree, dynamic_veh_state, ped_points, center_spots, observed_spots, Car_obj, p_l, p_w):
     """
@@ -364,6 +410,7 @@ fig, ax = plt.subplots(figsize=(10, 8))
 figa, axa = plt.subplots(figsize=(10, 8))
 axes = [ax, axa]
 x_min, x_max, y_min, y_max, p_w, p_l, l_w, n_r, n_s, n_s1, obstacleX, obstacleY, s, center_spots, occ_spot_indices, roads_x, roads_y = map_lot(type, config_map, Car_obj, axes)
+map_limits = (x_min, x_max, y_min, y_max)
 
 p = np.array(s)
 
@@ -445,7 +492,7 @@ wb_2 = Car_obj.wheelBase / 2
 
 time_pred = []
 time_strat = []
-n_sims = 1
+n_sims = 100
 for _ in range(n_sims):
 
     t = 0
@@ -474,7 +521,7 @@ for _ in range(n_sims):
 
         # plot_ell(s, Car_obj, ax)
 
-        observed_spots, explore_points = rect_dist_obs_spots_plot(p, center_spots, roads_x, roads_y, Car_obj, ax)
+        observed_spots, explore_points = rect_dist_obs_spots_plot(p, center_spots, roads_x, roads_y, map_limits, Car_obj, ax)
         # print("Observed Spots: ", observed_spots)
 
         occ_spots, vac_spots, occ_spots_dyn, occ_spots_veh, occ_spots_ped = get_occ_vac_spots(static_obs_kd_tree, dynamic_veh_path_t[:, 0, :], ped_path_t[:, 0, :], center_spots, observed_spots, Car_obj, p_l, p_w)
@@ -513,18 +560,20 @@ for _ in range(n_sims):
             goal_park_spots = list(chain.from_iterable(goal_park_spots))
             # transforming to center of vehicle
             g_list = [[g[0] + wb_2 * np.cos(g[2]), g[1] + wb_2 * np.sin(g[2]), g[2]] for g in goal_park_spots]
-
-            start_strat = time.time()
+            
             results_raw = parallel_run(p, obstacleX_t, obstacleY_t, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION, g_list)
 
             results = [result[0] for result in results_raw if result[-1]]
+
+        else:
+            time_pred.append(0.0)
         # print(f"State of ego: {p}, at time: {t}")
 
         # if t>=4:
         #     print("Stop!")
 
         T_explore = 2
-
+        start_strat = time.time()
         if results:
             path_list = [np.array([path.x_list, path.y_list, path.yaw_list]).T for path in results]
             longest_path_to_spot = max([len(path) for path in path_list])
@@ -558,11 +607,12 @@ for _ in range(n_sims):
                 # straight_goal = dynamic_veh_0[0] + np.array([0.0, -15.0, 0.0])
                 # path_list_ex = [np.array([p + (i*MOTION_RESOLUTION) * np.array([0.0, -2.0, 0.0]) for i in range(int(T_explore/MOTION_RESOLUTION))])]
                 
-                g_list_ex = [[explore_points[i, 0], explore_points[i, 1], explore_points[i, 2]] for i in range(explore_points.shape[0])]                
-                results_raw_ex = parallel_run(p, obstacleX_t, obstacleY_t, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION, g_list_ex)
+                g_list_ex = [[explore_points[i, 0], explore_points[i, 1], explore_points[i, 2]] for i in range(explore_points.shape[0])]
+                # path_list_ex_s = [np.array(spline_inter(p, g_list_ex[0])).T] # go straight
+                path_list_ex_s = [np.array([p + (i*MOTION_RESOLUTION) * np.array([0.0, -2.0, 0.0]) for i in range(int(T_explore/MOTION_RESOLUTION))])]                
+                results_raw_ex = parallel_run(p, obstacleX_t, obstacleY_t, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION, g_list_ex[1:]) # ignoring straight goal
                 results_ex = [result[0] for result in results_raw_ex if result[-1]]
-                path_list_ex = [np.array([path.x_list, path.y_list, path.yaw_list]).T for path in results_ex]
-
+                path_list_ex = path_list_ex_s + [np.array([path.x_list, path.y_list, path.yaw_list]).T for path in results_ex]
                 if path_list_ex:
                     # path_list_ex = [[np.array([path.x_list, path.y_list, path.yaw_list]).T] for path in results]
                     longest_path_to_spot = max([len(path) for path in path_list_ex])
@@ -583,16 +633,16 @@ for _ in range(n_sims):
                         path_eval_ex.append(path_current)
 
                     if not all(collisions_ex):
-                        # print("Exploring")
+                        # print("Exploring inside")
                         best_path_ex = path_eval_ex[np.argmin(costs_ex)]
                         p_all = np.vstack((p_all, best_path_ex[1:]))
                         t += best_path_ex.shape[0]-1
                     else:
-                        # print("Stationary")
+                        print("Stationary")
                         p_all = np.vstack((p_all, p[None, :]))
                         t += 1
                 else:
-                    # print("Stationary")
+                    print("Stationary")
                     p_all = np.vstack((p_all, p[None, :]))
                     t += 1
 
@@ -609,10 +659,12 @@ for _ in range(n_sims):
             # results = [result[0] for result in results_raw if result[-1]]
             # path_list_ex = [np.array([p + (i*MOTION_RESOLUTION) * np.array([0.0, -2.0, 0.0]) for i in range(int(T_explore/MOTION_RESOLUTION))])]
             
-            g_list_ex = [[explore_points[i, 0], explore_points[i, 1], explore_points[i, 2]] for i in range(explore_points.shape[0])]                
-            results_raw_ex = parallel_run(p, obstacleX_t, obstacleY_t, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION, g_list_ex)
+            g_list_ex = [[explore_points[i, 0], explore_points[i, 1], explore_points[i, 2]] for i in range(explore_points.shape[0])]
+            # path_list_ex_s = [np.array(spline_inter(p, g_list_ex[0])).T] # spline for going straight
+            path_list_ex_s = [np.array([p + (i*MOTION_RESOLUTION) * np.array([0.0, -2.0, 0.0]) for i in range(int(T_explore/MOTION_RESOLUTION))])]                
+            results_raw_ex = parallel_run(p, obstacleX_t, obstacleY_t, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION, g_list_ex[1:]) # ignoring straight goal
             results_ex = [result[0] for result in results_raw_ex if result[-1]]
-            path_list_ex = [np.array([path.x_list, path.y_list, path.yaw_list]).T for path in results_ex]
+            path_list_ex = path_list_ex_s + [np.array([path.x_list, path.y_list, path.yaw_list]).T for path in results_ex]
             if path_list_ex:
                 # path_list_ex = [[np.array([path.x_list, path.y_list, path.yaw_list]).T] for path in results]
                 longest_path_to_spot = max([len(path) for path in path_list_ex])
@@ -632,23 +684,24 @@ for _ in range(n_sims):
                     collisions_ex.append(collision_current)
                     wait_times_ex.append(wait_time_current)
                     path_eval_ex.append(path_current)
-
+                
                 if not all(collisions_ex):
-                    # print("Exploring")
+                    # print("Exploring outside")
                     best_path_ex = path_eval_ex[np.argmin(costs_ex)]
+                    if len(path_list_ex)>1:
+                        best_path_ex = path_list_ex[1]
                     p_all = np.vstack((p_all, best_path_ex[1:]))
                     t += best_path_ex.shape[0]-1
                 else:
-                    # print("Stationary")
+                    print("Stationary")
                     p_all = np.vstack((p_all, p[None, :]))
                     t += 1
             else:
-                # print("Stationary")
+                print("Stationary")
                 p_all = np.vstack((p_all, p[None, :]))
                 t += 1
 
-
-        # time_strat.append(time.time() - start_strat)
+        time_strat.append(time.time() - start_strat)
         p = p_all[-1]
         if len(test_spots_ind):
             reached_spot = np.min(np.linalg.norm(test_spots_center - p[None, :2], axis=1)) < goal_thresh
@@ -672,7 +725,7 @@ for time_dynamic in range(t+1):
 
     plot_car_trans(p_all[time_dynamic, 0], p_all[time_dynamic, 1], p_all[time_dynamic, 2], ax)
 
-observed_spots, explore_points = rect_dist_obs_spots_plot(p, center_spots, roads_x, roads_y, Car_obj, ax)
+observed_spots, explore_points = rect_dist_obs_spots_plot(p, center_spots, roads_x, roads_y, map_limits, Car_obj, ax)
 for ax in axes:
     ax.axis('equal')
 
