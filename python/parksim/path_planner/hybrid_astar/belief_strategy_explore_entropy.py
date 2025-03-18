@@ -92,8 +92,6 @@ def spline_inter(start, goal):
 
     return X, Y, headings
 
-
-
 def rect_dist_obs_spots_plot(p, center_spots, roads, roads_y, map_limits, Car_obj, ax):
     d = Car_obj.length
     p_x = p[0] + d * np.cos(p[2])
@@ -159,9 +157,111 @@ def rect_dist_obs_spots_plot(p, center_spots, roads, roads_y, map_limits, Car_ob
     car1 = car + np.array([[p_x], [p_y]])  # (2xN) N are vertices
     ax.plot(car1[0, :], car1[1, :], color='blue', alpha=0.2)
     ax.plot(p_x, p_y, linestyle='', marker='o', color='blue')
-    ax.plot(explore_points_final[:, 0], explore_points_final[:, 1], linestyle='', marker='o', color='green')
+    ax.plot(explore_points_final[:, 0], explore_points_final[:, 1], linestyle='', marker='o', color='green')    
 
     return observed_spots, explore_points_final
+
+def rect_dist_obs_p_spots_plot(p, center_spots, roads, roads_y, map_limits, Car_obj, ax):
+
+    beta_l = 3.0
+    beta_w = 10.0
+    long_scale = beta_l * Car_obj.length
+    lat_scale = beta_w * Car_obj.width
+
+    d = (beta_l - 1)* (Car_obj.length / 2) 
+    p_x = p[0] + d * np.cos(p[2])
+    p_y = p[1] + d * np.sin(p[2])
+    p_yaw = p[2]
+
+    spot_t = center_spots - np.array([p_x, p_y]) # translate the frame (wrt ego's center)
+    rotationZ = np.array([[np.cos(p_yaw), -np.sin(p_yaw)],
+                          [np.sin(p_yaw), np.cos(p_yaw)]])
+    spot_t = np.dot(spot_t, rotationZ) # rotate the frame (wrt ego's heading)
+
+    dist_inf_norm = np.max(
+        np.array([1 / (long_scale / 2), 1 / (lat_scale / 2)]) * np.abs(spot_t), axis=1)  # scale the infinity norm by length and width
+    observed_spots = np.where(dist_inf_norm <= 1)[0]
+
+    # p is partially observed
+    p_ex = 2.0
+    # d_ex = (beta_l*p_ex - 1)* (Car_obj.length / 2) 
+    # p_ex_x = p[0] + d_ex * np.cos(p[2])
+    # p_ex_y = p[1] + d_ex * np.sin(p[2])
+    # p_yaw = p[2]
+
+    # spot_ex_t = center_spots - np.array([p_x, p_y]) 
+    dist_p_inf_norm = np.max(
+        np.array([1 / (long_scale / 2), 1 / (lat_scale / 2)]) * np.abs(spot_t), axis=1)  # scale the infinity norm by length and width
+    observed_p_all_spots = np.where(dist_p_inf_norm <= p_ex)[0]
+    observed_p_spots = np.array(list(set(observed_p_all_spots) -  set(observed_spots)))
+
+    ## For exploration
+    # only x is relevant in roads_ego
+
+    # vertical lane
+    if abs(abs(p_yaw/(np.pi/2))-1) < 0.0001:
+        roads = np.array([[0]*len(roads_y), roads_y]).T
+    # horizontal lane
+    elif abs(abs(p_yaw/(np.pi)) - 0)<=0.0001 or abs(abs(p_yaw/(np.pi)) - 1)<=0.0001:
+        roads = np.array([roads_x, [0]*len(roads_x)]).T
+
+    # wrt ego's center
+    x_max = (beta_l - 0.5)*Car_obj.length
+    y_max = (beta_w)*Car_obj.width/2
+    y_min = -(beta_w)*Car_obj.width/2
+    roads_ego = roads - np.array([p[0], p[1]])
+    roads_ego = np.dot(roads_ego, rotationZ)
+    roads_in_FOV = roads_ego[np.where(roads_ego[:, 0] >= 0)[0], 0]
+    roads_in_FOV = roads_in_FOV[np.where(roads_in_FOV < x_max)[0]]
+
+    straight = [x_max, 0.0, p_yaw]
+    if roads_in_FOV.size > 0:
+        x_center = roads_in_FOV[0] # change this depending on center of new road
+        # angle wrap is (x + pi)%(2*pi) - pi for angles in [-pi, pi]
+        # p_yaw + pi/2 for left, p_yaw - pi/2 for right assuming p_yaw in {0, pi/2, pi, -pi/2}
+        left = [x_center + l_w/4, y_max, (p_yaw + np.pi/2 + np.pi) % (2 * np.pi) - np.pi]
+        right = [x_center - l_w/4, y_min, (p_yaw - np.pi/2 + np.pi) % (2 * np.pi) - np.pi]
+        explore_points = np.array([straight, left, right])
+    else:
+        explore_points = np.array([straight])
+    
+    explore_points[:, :2] = np.dot(explore_points[:, :2], rotationZ.T) # rotate the frame (from ego's heading to global frame)
+    explore_points[:, :2] = explore_points[:, :2] + np.array([p[0], p[1]]) # translate the frame (from ego's center to global frame)
+
+    explore_points_final = np.array([explore_points[i] for i in range(explore_points.shape[0]) 
+                                     if valid_point(explore_points[i], map_limits)])
+
+    ## plot the 1 distance rectangle
+    car = np.array(
+        [[-Car_obj.length/2, -Car_obj.length/2, Car_obj.length/2, Car_obj.length/2, -Car_obj.length/2],
+         [Car_obj.width / 2, -Car_obj.width / 2, -Car_obj.width / 2, Car_obj.width / 2, Car_obj.width / 2]])
+    car[0, :] = beta_l * car[0, :]
+    car[1, :] = beta_w * car[1, :]
+
+    car_o = np.dot(rotationZ, np.array(
+        [[-Car_obj.length/2, -Car_obj.length/2, Car_obj.length/2, Car_obj.length/2, -Car_obj.length/2],
+         [Car_obj.width / 2, -Car_obj.width / 2, -Car_obj.width / 2, Car_obj.width / 2, Car_obj.width / 2]])) # car is 2xN
+    car1_o = car_o + np.array([[p[0]], [p[1]]])  # (2xN) N are vertices
+
+    car = np.dot(rotationZ, car) # car is 2xN
+    car1 = car + np.array([[p_x], [p_y]])  # (2xN) N are vertices
+    ax.plot(car1[0, :], car1[1, :], color='blue', alpha=0.2)
+
+    car_p = np.array(
+        [[-Car_obj.length/2, -Car_obj.length/2, Car_obj.length/2, Car_obj.length/2, -Car_obj.length/2],
+         [Car_obj.width / 2, -Car_obj.width / 2, -Car_obj.width / 2, Car_obj.width / 2, Car_obj.width / 2]])
+    car_p[0, :] = (beta_l*p_ex) * car_p[0, :]
+    car_p[1, :] = (beta_w*p_ex) * car_p[1, :]
+    car_p = np.dot(rotationZ, car_p) # car is 2xN
+    car1_p = car_p + np.array([[p_x], [p_y]])  # (2xN) N are vertices
+    ax.plot(car1_p[0, :], car1_p[1, :], color='orange', alpha=0.2)
+    # ax.plot(p_x, p_y, linestyle='', marker='o', color='blue')
+    ax.plot(explore_points_final[:, 0], explore_points_final[:, 1], linestyle='', marker='o', color='green')
+
+    ax.plot(car1_o[0, :], car1_o[1, :], color='green')
+
+    return observed_spots, explore_points_final, observed_p_spots
+
 
 def get_occ_vac_spots(static_obs_kd_tree, dynamic_veh_state, ped_points, center_spots, observed_spots, Car_obj, p_l, p_w):
     """
@@ -280,7 +380,6 @@ def get_ped_points(PED_RAD, p):
         obstacleY = obstacleY + [p_y + PED_RAD*np.sin(angles[i])]
 
     return obstacleX, obstacleY
-
 
 def parallel_run(start, ox, oy, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION, g_list):
     with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
@@ -497,7 +596,7 @@ wb_2 = Car_obj.wheelBase / 2
 
 time_pred = []
 time_strat = []
-n_sims = 100
+n_sims = 1
 for _ in range(n_sims):
 
     t = 0
@@ -525,8 +624,8 @@ for _ in range(n_sims):
         #     obstacleY_t = obstacleY_t + dyn_Y
 
         # plot_ell(s, Car_obj, ax)
-
-        observed_spots, explore_points = rect_dist_obs_spots_plot(p, center_spots, roads_x, roads_y, map_limits, Car_obj, ax)
+        
+        observed_spots, explore_points, observed_p_spots = rect_dist_obs_p_spots_plot(p, center_spots, roads_x, roads_y, map_limits, Car_obj, ax)
         # print("Observed Spots: ", observed_spots)
 
         occ_spots, vac_spots, occ_spots_dyn, occ_spots_veh, occ_spots_ped = get_occ_vac_spots(static_obs_kd_tree, dynamic_veh_path_t[:, 0, :], ped_path_t[:, 0, :], center_spots, observed_spots, Car_obj, p_l, p_w)
