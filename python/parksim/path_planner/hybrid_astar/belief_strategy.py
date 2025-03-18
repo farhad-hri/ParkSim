@@ -328,7 +328,7 @@ Car_obj = Car_class(config_planner)
 fig, ax = plt.subplots(figsize=(10, 8))
 figa, axa = plt.subplots(figsize=(10, 8))
 axes = [ax, axa]
-x_min, x_max, y_min, y_max, p_w, p_l, l_w, n_r, n_s, n_s1, obstacleX, obstacleY, s, center_spots, occ_spot_indices = map_lot(type, config_map, Car_obj, axes)
+x_min, x_max, y_min, y_max, p_w, p_l, l_w, n_r, n_s, n_s1, obstacleX, obstacleY, s, center_spots, occ_spot_indices, roads_x, raods_y = map_lot(type, config_map, Car_obj, axes)
 
 p = np.array(s)
 

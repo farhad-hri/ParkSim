@@ -507,8 +507,8 @@ def map_lot(type, config_map, Car_obj, axes):
     y_max = y_min + l_w + n_s1 * p_w + l_w
 
     ## big_lot: center of vehicle
-    #s = [x_min + (x_max - x_min)/2, y_max - l_w/4, np.deg2rad(-180.0)] # start_x is middle, start_y is close to y_max
-    s = [x_min + 2*l_w + 4*p_l + 1*l_w/4, y_max - l_w - (n_s1 - 2)*p_w - p_w/2, np.deg2rad(-90.0)] # start_x is middle, start_y is close to y_max
+    s = [x_min + (x_max - x_min)/2 - 1.5*p_l, y_max - l_w/4, np.deg2rad(-180.0)] # start_x is middle, start_y is close to y_max
+    # s = [x_min + 2*l_w + 4*p_l + 1*l_w/4, y_max - l_w - (n_s1 - 3)*p_w - p_w/2, np.deg2rad(-90.0)]
 
     center_spots = []
     occ_spot_indices = []
@@ -517,16 +517,31 @@ def map_lot(type, config_map, Car_obj, axes):
 
     center_line_park_row_x_1 = x_min + l_w + p_l
 
+    roads_x = [x_min + l_w/2]
+    roads_y = [y_min + l_w/2, y_max - l_w/2]
+    # road lane divider
+    for ax in axes:
+        # roads_x
+        ax.plot([roads_x[0]]*2, [y_min, y_max], color='gold', linestyle='--', alpha=0.6)
+        # roads_y
+        ax.plot([x_min, x_max], [roads_y[0]]*2, color='gold', linestyle='--', alpha=0.6) 
+        ax.plot([x_min, x_max], [roads_y[1]]*2, color='gold', linestyle='--', alpha=0.6) 
+
+
     for _ in range(n_r):
+        roads_x.append(center_line_park_row_x_1 + p_l + l_w/2)
         center_line_park_row_x = [center_line_park_row_x_1] * len(center_line_park_row_y)
         for ax in axes:
             ax.plot(center_line_park_row_x, center_line_park_row_y, color='grey', linestyle='--', alpha=0.6)
+            ax.plot([roads_x[-1]]*2, [y_min, y_max], color='gold', linestyle='--', alpha=0.6) # road lane divider
 
         short_line_park_row_x = [center_line_park_row_x_1- p_l, center_line_park_row_x_1 + p_l]
 
         short_line_park_row_y_1 = y_min + l_w + p_w
         for _ in range(n_s1-1):
             short_line_park_row_y = [short_line_park_row_y_1]*len(short_line_park_row_x)
+            for ax in axes:
+                ax.plot(short_line_park_row_x, short_line_park_row_y, color='grey', linestyle='--', alpha=0.6)
 
             short_line_park_row_y_1 += p_w
 
@@ -599,7 +614,7 @@ def map_lot(type, config_map, Car_obj, axes):
 
     center_spots = np.array(center_spots)
 
-    return x_min, x_max, y_min, y_max, p_w, p_l, l_w, n_r, n_s, n_s1, obstacleX, obstacleY, s, center_spots, occ_spot_indices
+    return x_min, x_max, y_min, y_max, p_w, p_l, l_w, n_r, n_s, n_s1, obstacleX, obstacleY, s, center_spots, occ_spot_indices, roads_x, roads_y
 
 def dist_to_obst(x, y, yaw, ox, oy):
     # transform obstacles to base link frame
