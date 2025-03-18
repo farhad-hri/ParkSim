@@ -59,9 +59,25 @@ def rect_dist_obs_spots_plot(p, center_spots, Car_obj, ax):
     rotationZ = np.array([[np.cos(p_yaw), -np.sin(p_yaw)],
                           [np.sin(p_yaw), np.cos(p_yaw)]])
     spot_t = np.dot(spot_t, rotationZ) # rotate the frame (wrt ego's heading)
+
     dist_inf_norm = np.max(
         np.array([1 / (beta_l * Car_obj.length / 2), 1 / (beta_w * Car_obj.width / 2)]) * np.abs(spot_t), axis=1)  # scale the infinity norm by length and width
     observed_spots = np.where(dist_inf_norm <= 1)[0]
+    
+    ## For exploration
+    # wrt ego's center
+    x_max = (beta_l - 0.5)*Car_obj.length
+    y_max = (beta_w)*Car_obj.width/2
+    y_min = -(beta_w)*Car_obj.width/2
+    x_center = Car_obj.width*3/2 + l_w/2 + 1 # change this depending on center of new road
+
+    straight = [x_max, 0.0]
+    left = [x_center + Car_obj.width/2, y_max]
+    right = [x_center - Car_obj.width/2, y_min]
+
+    explore_points = np.array([straight, left, right])
+    explore_points = np.dot(explore_points, rotationZ.T) # rotate the frame (from ego's heading to global frame)
+    explore_points = explore_points + np.array([p[0], p[1]]) # translate the frame (from ego's center to global frame)
 
     ## plot the 1 distance rectangle
     car = np.array(
@@ -74,6 +90,7 @@ def rect_dist_obs_spots_plot(p, center_spots, Car_obj, ax):
     car1 = car + np.array([[p_x], [p_y]])  # (2xN) N are vertices
     ax.plot(car1[0, :], car1[1, :], color='blue', alpha=0.2)
     ax.plot(p_x, p_y, linestyle='', marker='o', color='blue')
+    ax.plot(explore_points[:, 0], explore_points[:, 1], linestyle='', marker='o', color='green')
 
     return observed_spots
 
