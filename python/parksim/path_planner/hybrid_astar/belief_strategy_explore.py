@@ -92,8 +92,6 @@ def spline_inter(start, goal):
 
     return X, Y, headings
 
-
-
 def rect_dist_obs_spots_plot(p, center_spots, roads, roads_y, map_limits, Car_obj, ax):
     d = Car_obj.length
     p_x = p[0] + d * np.cos(p[2])
@@ -168,6 +166,7 @@ def rect_dist_obs_spots_plot(p, center_spots, roads, roads_y, map_limits, Car_ob
     # ax.plot(car1_o[0, :], car1_o[1, :], color='green')
 
     return observed_spots, explore_points_final
+
 
 def get_occ_vac_spots(static_obs_kd_tree, dynamic_veh_state, ped_points, center_spots, observed_spots, Car_obj, p_l, p_w):
     """
