@@ -864,7 +864,7 @@ for _ in range(n_sims):
                             entropy_after = (-P_O_all_spots_after*np.log(P_O_all_spots_after)-(1-P_O_all_spots_after)*np.log(1-P_O_all_spots_after))/np.log(2)
                             entropy_after[observed_spots_e] = 0.0
 
-                            fract_IG = (np.sum(entropy_before) - np.sum(entropy_after))/np.sum(entropy_before)
+                            fract_IG = (np.sum(entropy_before) - np.sum(entropy_after)) # /np.sum(entropy_before)
                             costs_ex[g_e_i] -= fract_IG
 
                         best_path_ex = path_eval_ex[np.argmin(costs_ex)]
@@ -939,12 +939,10 @@ for _ in range(n_sims):
                         entropy_after = (-P_O_all_spots_after*np.log(P_O_all_spots_after)-(1-P_O_all_spots_after)*np.log(1-P_O_all_spots_after))/np.log(2)
                         entropy_after[observed_spots_e] = 0.0
 
-                        fract_IG = (np.sum(entropy_before) - np.sum(entropy_after))/np.sum(entropy_before)
+                        fract_IG = (np.sum(entropy_before) - np.sum(entropy_after)) # /np.sum(entropy_before)
                         costs_ex[g_e_i] -= fract_IG
 
                     best_path_ex = path_eval_ex[np.argmin(costs_ex)]
-                    # if len(path_list_ex)>1:
-                    #     best_path_ex = path_list_ex[1]
                     p_all = np.vstack((p_all, best_path_ex))
                     t += best_path_ex.shape[0]
                 else:
