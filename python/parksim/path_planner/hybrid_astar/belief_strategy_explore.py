@@ -160,6 +160,12 @@ def rect_dist_obs_spots_plot(p, center_spots, roads, roads_y, map_limits, Car_ob
     ax.plot(car1[0, :], car1[1, :], color='blue', alpha=0.2)
     ax.plot(p_x, p_y, linestyle='', marker='o', color='blue')
     ax.plot(explore_points_final[:, 0], explore_points_final[:, 1], linestyle='', marker='o', color='green')
+    
+    # car_o = np.dot(rotationZ, np.array(
+    # [[-Car_obj.length/2, -Car_obj.length/2, Car_obj.length/2, Car_obj.length/2, -Car_obj.length/2],
+    #     [Car_obj.width / 2, -Car_obj.width / 2, -Car_obj.width / 2, Car_obj.width / 2, Car_obj.width / 2]])) # car is 2xN
+    # car1_o = car_o + np.array([[p[0]], [p[1]]])  # (2xN) N are vertices
+    # ax.plot(car1_o[0, :], car1_o[1, :], color='green')
 
     return observed_spots, explore_points_final
 
@@ -613,11 +619,11 @@ for _ in range(n_sims):
                 # path_list_ex = [np.array([p + (i*MOTION_RESOLUTION) * np.array([0.0, -2.0, 0.0]) for i in range(int(T_explore/MOTION_RESOLUTION))])]
                 
                 g_list_ex = [[explore_points[i, 0], explore_points[i, 1], explore_points[i, 2]] for i in range(explore_points.shape[0])]
-                # path_list_ex_s = [np.array(spline_inter(p, g_list_ex[0])).T] # go straight spline
+                path_list_ex_s = [np.array(spline_inter(p, g_list_ex[0])).T] # go straight spline
                 # path_list_ex = [np.array(spline_inter(p, g_ex)).T for g_ex in g_list_ex] # spline for all
-                path_list_ex_s = [np.array([p + (i*MOTION_RESOLUTION) * np.array([0.0, -2.0, 0.0]) for i in range(int(T_explore/MOTION_RESOLUTION))])] # CV                 
+                # path_list_ex_s = [np.array([p + (i*MOTION_RESOLUTION) * np.array([2.0*np.cos(p[2]), 2.0*np.sin(p[2]), 0.0]) for i in range(int(T_explore/MOTION_RESOLUTION))])] # CV                 
                 results_raw_ex = parallel_run(p, obstacleX_t, obstacleY_t, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION, g_list_ex[1:]) # ignoring straight goal
-                results_ex = [result[0] for result in results_raw_ex if result[-1]]
+                results_ex = [result[0] for result in results_raw_ex if result[-1]] # filtering out no path cases
                 path_list_ex = path_list_ex_s + [np.array([path.x_list, path.y_list, path.yaw_list]).T for path in results_ex]
                 if path_list_ex:
                     # path_list_ex = [[np.array([path.x_list, path.y_list, path.yaw_list]).T] for path in results]
@@ -666,11 +672,11 @@ for _ in range(n_sims):
             # path_list_ex = [np.array([p + (i*MOTION_RESOLUTION) * np.array([0.0, -2.0, 0.0]) for i in range(int(T_explore/MOTION_RESOLUTION))])]
             
             g_list_ex = [[explore_points[i, 0], explore_points[i, 1], explore_points[i, 2]] for i in range(explore_points.shape[0])]
-            # path_list_ex_s = [np.array(spline_inter(p, g_list_ex[0])).T] # go straight spline
+            path_list_ex_s = [np.array(spline_inter(p, g_list_ex[0])).T] # go straight spline
             # path_list_ex = [np.array(spline_inter(p, g_ex)).T for g_ex in g_list_ex] # spline for all
-            path_list_ex_s = [np.array([p + (i*MOTION_RESOLUTION) * np.array([0.0, -2.0, 0.0]) for i in range(int(T_explore/MOTION_RESOLUTION))])] # CV               
+            # path_list_ex_s = [np.array([p + (i*MOTION_RESOLUTION) * np.array([2.0*np.cos(p[2]), 2.0*np.sin(p[2]), 0.0]) for i in range(int(T_explore/MOTION_RESOLUTION))])] # CV               
             results_raw_ex = parallel_run(p, obstacleX_t, obstacleY_t, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION, g_list_ex[1:]) # ignoring straight goal
-            results_ex = [result[0] for result in results_raw_ex if result[-1]]
+            results_ex = [result[0] for result in results_raw_ex if result[-1]] # filtering out no path cases
             path_list_ex = path_list_ex_s + [np.array([path.x_list, path.y_list, path.yaw_list]).T for path in results_ex]
             if path_list_ex:
                 # path_list_ex = [[np.array([path.x_list, path.y_list, path.yaw_list]).T] for path in results]
@@ -695,8 +701,8 @@ for _ in range(n_sims):
                 if not all(collisions_ex):
                     # print("Exploring outside")
                     best_path_ex = path_eval_ex[np.argmin(costs_ex)]
-                    if len(path_list_ex)>1:
-                        best_path_ex = path_list_ex[1]
+                    # if len(path_list_ex)>1:
+                    #     best_path_ex = path_list_ex[1]
                     p_all = np.vstack((p_all, best_path_ex[1:]))
                     t += best_path_ex.shape[0]-1
                 else:
