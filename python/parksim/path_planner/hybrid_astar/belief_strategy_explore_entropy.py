@@ -214,7 +214,7 @@ def rect_dist_obs_p_spots_plot(p, center_spots, roads, roads_y, map_limits, Car_
     roads_in_FOV = roads_ego[np.where(roads_ego[:, 0] >= 0)[0], 0]
     roads_in_FOV = roads_in_FOV[np.where(roads_in_FOV < x_max)[0]]
 
-    straight = [x_max, 0.0, p_yaw]
+    straight = [x_max - Car_obj.length, 0.0, p_yaw]
     if roads_in_FOV.size > 0:
         x_center = roads_in_FOV[0] # change this depending on center of new road
         # angle wrap is (x + pi)%(2*pi) - pi for angles in [-pi, pi]
@@ -315,7 +315,7 @@ def rect_dist_obs_p_spots_e(p, center_spots, roads, roads_y, map_limits, Car_obj
     roads_in_FOV = roads_ego[np.where(roads_ego[:, 0] >= 0)[0], 0]
     roads_in_FOV = roads_in_FOV[np.where(roads_in_FOV < x_max)[0]]
 
-    straight = [x_max, 0.0, p_yaw]
+    straight = [x_max - Car_obj.length, 0.0, p_yaw]
     if roads_in_FOV.size > 0:
         x_center = roads_in_FOV[0] # change this depending on center of new road
         # angle wrap is (x + pi)%(2*pi) - pi for angles in [-pi, pi]
