@@ -507,8 +507,8 @@ def map_lot(type, config_map, Car_obj, axes):
     y_max = y_min + l_w + n_s1 * p_w + l_w
 
     ## big_lot: center of vehicle
-    s = [x_min + (x_max - x_min)/2 - 1.5*p_l, y_max - l_w/4, np.deg2rad(-180.0)] # start_x is middle, start_y is close to y_max
-    #s = [x_min + 2*l_w + 4*p_l + 1*l_w/4, y_max - l_w - (n_s1 - 5)*p_w - p_w/2, np.deg2rad(-90.0)]
+    # s = [x_min + (x_max - x_min)/2 - 1.5*p_l, y_max - l_w/4, np.deg2rad(-180.0)] # start_x is middle, start_y is close to y_max
+    s = [x_min + 2*l_w + 4*p_l + 1*l_w/4, y_max - l_w - (n_s1 - 6)*p_w - p_w/2, np.deg2rad(-90.0)]
 
     center_spots = []
     occ_spot_indices = []
@@ -520,12 +520,12 @@ def map_lot(type, config_map, Car_obj, axes):
     roads_x = [x_min + l_w/2]
     roads_y = [y_min + l_w/2, y_max - l_w/2]
     # road lane divider
-    for ax in axes:
-        # roads_x
-        ax.plot([roads_x[0]]*2, [y_min, y_max], color='gold', linestyle='--', alpha=0.6)
-        # roads_y
-        ax.plot([x_min, x_max], [roads_y[0]]*2, color='gold', linestyle='--', alpha=0.6) 
-        ax.plot([x_min, x_max], [roads_y[1]]*2, color='gold', linestyle='--', alpha=0.6) 
+    # for ax in axes:
+    #     # roads_x
+    #     ax.plot([roads_x[0]]*2, [y_min, y_max], color='gold', linestyle='--', alpha=0.6)
+    #     # roads_y
+    #     ax.plot([x_min, x_max], [roads_y[0]]*2, color='gold', linestyle='--', alpha=0.6) 
+    #     ax.plot([x_min, x_max], [roads_y[1]]*2, color='gold', linestyle='--', alpha=0.6) 
 
 
     for _ in range(n_r):
@@ -533,7 +533,7 @@ def map_lot(type, config_map, Car_obj, axes):
         center_line_park_row_x = [center_line_park_row_x_1] * len(center_line_park_row_y)
         for ax in axes:
             ax.plot(center_line_park_row_x, center_line_park_row_y, color='grey', linestyle='--', alpha=0.6)
-            ax.plot([roads_x[-1]]*2, [y_min, y_max], color='gold', linestyle='--', alpha=0.6) # road lane divider
+            # ax.plot([roads_x[-1]]*2, [y_min, y_max], color='gold', linestyle='--', alpha=0.6) # road lane divider
 
         short_line_park_row_x = [center_line_park_row_x_1- p_l, center_line_park_row_x_1 + p_l]
 
@@ -579,6 +579,10 @@ def map_lot(type, config_map, Car_obj, axes):
         obstacleX, obstacleY, center_spots = map_lot_place_cars(p_x, p_y, p_yaw, indices, Car_obj, p_w, n_s1, obstacleX, obstacleY, center_spots, axes)
         
         prob_all_spots.append(p_vertical)
+
+    # ## manually placing a car
+    # p_m = np.hstack((center_spots[29], np.deg2rad(0.0)))
+    # obstacleX, obstacleY, center_spots = map_lot_place_cars(p_m[0], p_m[1], p_m[2], indices, Car_obj, p_w, n_s1, obstacleX, obstacleY, center_spots, axes)
 
     ## Plot occupancy probabilities
     prob_all_spots_n = np.array(prob_all_spots)

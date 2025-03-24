@@ -78,7 +78,7 @@ def spline_inter(start, goal):
     coeff_y = np.linalg.solve(A, by)
 
     # Generate the spline trajectory
-    T = np.linspace(0, 1, 10)
+    T = np.linspace(0, 1, 10) # 10 is number of spline points
     X = sum(c * T**i for i, c in enumerate(reversed(coeff_x)))
     Y = sum(c * T**i for i, c in enumerate(reversed(coeff_y)))
 
@@ -510,6 +510,23 @@ def plot_anim(ax, fig, p_all, dynamic_veh_path, ped_path):
 
     car_plot, arrow_plot = plot_car_return(p_all[0, 0], p_all[0, 1], p_all[0, 2], ax)
 
+    beta_l = 3.0
+    beta_w = 10.0
+    d = (beta_l - 1)* (Car_obj.length / 2) 
+    p_x_f = p[0] + d * np.cos(p[2])
+    p_y_f = p[1] + d * np.sin(p[2])
+    ## plot the 1 distance rectangle
+    car_FOV_o = np.array(
+        [[-Car_obj.length/2, -Car_obj.length/2, Car_obj.length/2, Car_obj.length/2, -Car_obj.length/2],
+         [Car_obj.width / 2, -Car_obj.width / 2, -Car_obj.width / 2, Car_obj.width / 2, Car_obj.width / 2]])
+    car_FOV_o[0, :] = beta_l * car_FOV_o[0, :]
+    car_FOV_o[1, :] = beta_w * car_FOV_o[1, :]
+    rotationZ = np.array([[np.cos(p_all[0, 2]), -np.sin(p_all[0, 2])],
+                        [np.sin(p_all[0, 2]), np.cos(p_all[0, 2])]])
+    car_FOV = np.dot(rotationZ, car_FOV_o) # car is 2xN
+    car1_FOV = car_FOV + np.array([[p_x_f], [p_y_f]])  # (2xN) N are vertices
+    car_FOV_plot, = ax.plot(car1_FOV[0, :], car1_FOV[1, :], color='blue', alpha=0.2)
+
     time_text = 't=' + str(time_traj[0])
     props = dict(boxstyle='round', facecolor='w', alpha=0.5, edgecolor='black', linewidth=2)
     text_t  = ax.text(2.5,30.5, time_text, fontsize=22, bbox=props)
@@ -553,6 +570,14 @@ def plot_anim(ax, fig, p_all, dynamic_veh_path, ped_path):
 
         text_t.set_text('t=' + str(time_traj[frame]))
 
+        p_x_f = p_x + d * np.cos(p_yaw)
+        p_y_f = p_y + d * np.sin(p_yaw)
+        rotationZ = np.array([[np.cos(p_yaw), -np.sin(p_yaw)],
+                        [np.sin(p_yaw), np.cos(p_yaw)]])
+        car_FOV = np.dot(rotationZ, car_FOV_o) # car is 2xN
+        car1_FOV = car_FOV + np.array([[p_x_f], [p_y_f]])  # (2xN) N are vertices
+        car_FOV_plot.set_data(car1_FOV[0, :], car1_FOV[1, :])
+
         # car = drawCar(Car_obj, x[frame], y[frame], yaw[frame])
         # car_plot_a.set_data(car[0, :], car[1, :])
         # arrow_plot_a.xy = [x[frame]+1*math.cos(yaw[frame]), y[frame]+1*math.sin(yaw[frame])]
@@ -563,7 +588,7 @@ def plot_anim(ax, fig, p_all, dynamic_veh_path, ped_path):
         #     dynamic_plot_a[i].center = (obst_x[frame][i], obst_y[frame][i],)
         # # dynamic_plot_a.set_data(obst_x[frame], obst_y[frame])
 
-        plot_list = dyn_cars + dyn_cars_arrow + [car_plot] + [arrow_plot] + [text_t] + ped
+        plot_list = dyn_cars + dyn_cars_arrow + [car_plot] + [arrow_plot] + [text_t] + ped + [car_FOV_plot]
         return plot_list
 
     # Create the animation
@@ -607,11 +632,15 @@ p = np.array(s)
 dynamic_veh_0 = np.array([np.hstack((center_spots[29], np.deg2rad(0.0))),
                           np.hstack((center_spots[32] + np.array([-Car_obj.length/2-l_w/4, -l_w/2]), np.deg2rad(90.0)))
                           ])
+# dynamic_veh_0 = np.array([np.hstack((center_spots[32] + np.array([-Car_obj.length/2-l_w/4, -l_w/2]), np.deg2rad(90.0)))
+#                           ])
 
 # center_spots[39] + np.array([-Car_obj.length/2 - l_w/4, p_w]), np.deg2rad(90.0)
 dynamic_veh_goal = np.array([np.hstack((center_spots[39] + np.array([-Car_obj.length/2 - l_w/4, p_w]), np.deg2rad(90.0))),
                              np.hstack((center_spots[35], np.deg2rad(0.0)))
                           ])
+# dynamic_veh_goal = np.array([np.hstack((center_spots[35], np.deg2rad(0.0)))
+#                           ])
 
 # dynamic_veh_0 = np.array([np.hstack((center_spots[35] + np.array([-Car_obj.length/2 - l_w/3, p_w]), np.deg2rad(110.0))),
 #                           np.hstack((center_spots[32] + np.array([-Car_obj.length/2-l_w/4, -l_w/2]), np.deg2rad(90.0)))
