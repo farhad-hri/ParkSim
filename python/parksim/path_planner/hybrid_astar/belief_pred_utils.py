@@ -34,9 +34,9 @@ def mahalanobis_distance(mu, Sigma, park_spot, Car_obj, ped_flag):
     # d_min = min(abs(d_x_min), abs(d_x_max), abs(d_y_min), abs(d_y_max))
 
     if ped_flag:
-        ped_un = np.trace(Sigma)
+        # ped_un = np.trace(Sigma)
         ped_un = 1
-        d_min = 2*np.linalg.norm((park_spot[:2] - mu[:2])*ped_un)
+        d_min = 10*np.linalg.norm((park_spot[:2] - mu[:2])*ped_un)
     else:
         d_min = distance.mahalanobis(park_spot[:2], mu[:2], Sigma)
 
@@ -65,7 +65,7 @@ def occupancy_probability_multiple_spots_occ_dep(T, dynamic_veh_path_t, ped_path
     """
     P_O_vacant = np.zeros((T + 1, len(vac_spots)))  # Occupancy probability for each time step and parking spot
     P_O_occ = np.zeros((T + 1, len(occ_spots_veh) + len(occ_spots_ped)))  # Occupancy probability for each time step and parking spot, focussed on departing agent
-    
+
     # Initialize with multiple vehicles' initial probability of occupying the spots
     yaw_t = dynamic_veh_path_t[:, 0, 2]
     cos_theta = np.cos(yaw_t)
