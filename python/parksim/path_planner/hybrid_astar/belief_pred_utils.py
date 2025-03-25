@@ -34,14 +34,18 @@ def mahalanobis_distance(mu, Sigma, park_spot, Car_obj, ped_flag):
     # d_min = min(abs(d_x_min), abs(d_x_max), abs(d_y_min), abs(d_y_max))
 
     if ped_flag:
-        # ped_un = np.trace(Sigma)
-        ped_un = 1
-        d_min = 10*np.linalg.norm((park_spot[:2] - mu[:2])*ped_un)
+        ped_un = np.trace(Sigma)
+        # ped_un = 1
+        d_min = (1/ped_un)*np.linalg.norm((park_spot[:2] - mu[:2]))
     else:
         d_min = distance.mahalanobis(park_spot[:2], mu[:2], Sigma)
 
     alpha_g = 350
-    prob = (alpha_g+1)/(alpha_g+np.exp(d_min))
+    ## for numerical stability of np.exp(d_min) if d_min is large
+    if d_min > np.log(1000 * alpha_g):
+        prob = 0.00001 # close to zero for log
+    else:
+        prob = (alpha_g+1)/(alpha_g+np.exp(d_min))
     # prob = (norm.cdf(d_x_max) - norm.cdf(d_x_min))*(norm.cdf(d_y_max) - norm.cdf(d_y_min))
 
     return prob

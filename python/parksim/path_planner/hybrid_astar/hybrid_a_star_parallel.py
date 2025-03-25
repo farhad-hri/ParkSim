@@ -56,7 +56,7 @@ COS_COST = 1.0 # cosine distance cost, aka, change in heading
 
 PED_RAD = 0.7
 DYNAMIC_SAFE_NET = 0.5
-DYNAMIC_SAFE_NET_PED = 0.9
+DYNAMIC_SAFE_NET_PED = 1.5
 MAX_WAIT_TIME = 4 # actual time (secs)
 INC_WAT_TIME = 1
 
@@ -508,7 +508,7 @@ def map_lot(type, config_map, Car_obj, axes):
 
     ## big_lot: center of vehicle
     # s = [x_min + (x_max - x_min)/2 - 1.5*p_l, y_max - l_w/4, np.deg2rad(-180.0)] # start_x is middle, start_y is close to y_max
-    s = [x_min + 2*l_w + 4*p_l + 1*l_w/4, y_max - l_w - (n_s1 - 5)*p_w - p_w/2, np.deg2rad(-90.0)]
+    s = [x_min + 2*l_w + 4*p_l + 1*l_w/4, y_max - l_w - (n_s1 - 4)*p_w - p_w/2, np.deg2rad(-90.0)]
 
     center_spots = []
     occ_spot_indices = []

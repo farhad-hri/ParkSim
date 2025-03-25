@@ -215,15 +215,20 @@ def rect_dist_obs_p_spots_plot(p, center_spots, roads, roads_y, map_limits, Car_
     roads_in_FOV = roads_in_FOV[np.where(roads_in_FOV < x_max)[0]]
 
     straight = [x_max - Car_obj.length, 0.0, p_yaw]
+    x_max_global = np.dot(np.array([[x_max, 0.0]]), rotationZ.T) + np.array([p[0], p[1]])
+    explore_points_l = []
+    if valid_point(x_max_global[0], map_limits):
+        explore_points_l = explore_points_l + [straight]
+
     if roads_in_FOV.size > 0:
         x_center = roads_in_FOV[0] # change this depending on center of new road
         # angle wrap is (x + pi)%(2*pi) - pi for angles in [-pi, pi]
         # p_yaw + pi/2 for left, p_yaw - pi/2 for right assuming p_yaw in {0, pi/2, pi, -pi/2}
         left = [x_center + l_w/4, y_max, (p_yaw + np.pi/2 + np.pi) % (2 * np.pi) - np.pi]
         right = [x_center - l_w/4, y_min, (p_yaw - np.pi/2 + np.pi) % (2 * np.pi) - np.pi]
-        explore_points = np.array([straight, left, right])
-    else:
-        explore_points = np.array([straight])
+        explore_points_l = explore_points_l + [left] + [right]
+
+    explore_points = np.array(explore_points_l)
     
     explore_points[:, :2] = np.dot(explore_points[:, :2], rotationZ.T) # rotate the frame (from ego's heading to global frame)
     explore_points[:, :2] = explore_points[:, :2] + np.array([p[0], p[1]]) # translate the frame (from ego's center to global frame)
@@ -255,10 +260,10 @@ def rect_dist_obs_p_spots_plot(p, center_spots, roads, roads_y, map_limits, Car_
     car_p = np.dot(rotationZ, car_p) # car is 2xN
     car1_p = car_p + np.array([[p_x], [p_y]])  # (2xN) N are vertices
     ax.plot(car1_p[0, :], car1_p[1, :], color='orange', alpha=0.2)
-    # ax.plot(p_x, p_y, linestyle='', marker='o', color='blue')
-    ax.plot(explore_points_final[:, 0], explore_points_final[:, 1], linestyle='', marker='o', color='green')
-
+    # ax.plot(p_x, p_y, linestyle='', marker='o', color='blue')    
     ax.plot(car1_o[0, :], car1_o[1, :], color='green')
+
+    ax.plot(explore_points_final[:, 0], explore_points_final[:, 1], linestyle='', marker='o', color='green')    
 
     return observed_spots, explore_points_final, observed_p_spots, dist_inf_norm
 
@@ -650,7 +655,7 @@ dynamic_veh_goal = np.array([np.hstack((center_spots[39] + np.array([-Car_obj.le
 #                              np.hstack((center_spots[35], np.deg2rad(0.0)))
 #                           ])
 
-dynamic_veh_parking = [0, 1] # 1 is parking/getting out using Hybrid A star, 0 is constant velocity/stationary
+dynamic_veh_parking = [1, 1] # 1 is parking/getting out using Hybrid A star, 0 is constant velocity/stationary
 T = 60 # total number of time steps to execute
 
 obstacleX_t = copy.deepcopy(obstacleX)
@@ -687,7 +692,7 @@ dynamic_veh_path=np.array(dynamic_veh_path)
 ped_0 = np.array([center_spots[28] + np.array([Car_obj.length/2-2, -Car_obj.width/2-1]),
                   center_spots[32] + np.array([-1, -1])]) # ped_in (0 velocity)
 # ped_0 = np.array([np.array([-Car_obj.length/2-2, -Car_obj.width/2-1])]) # no_ped
-ped_vel = np.array([[-0.5, -0.5],
+ped_vel = np.array([[-0.3, -0.3],
                     [0.0, 0.0]
                     ])
 # time steps
@@ -703,7 +708,7 @@ static_obs_kd_tree = cKDTree(static_xy)
 
 Sigma_0 = np.repeat(np.array([[[0.5 * Car_obj.length, 0], [0, 0.5 * Car_obj.width]]]), repeats=dynamic_veh_0.shape[0],
                     axis=0)  # Covariance for each vehicle
-Sigma_0_ped = np.repeat(np.array([[[0.0 * PED_RAD, 0], [0, 0.0 * PED_RAD]]]), repeats=ped_0.shape[0],
+Sigma_0_ped = np.repeat(np.array([[[0.01 * PED_RAD, 0], [0, 0.01 * PED_RAD]]]), repeats=ped_0.shape[0],
                         axis=0)  # Covariance for each pedestrian
 Q = np.array([[0.5, 0], [0, 0.5]])  # Process noise (uncertainty growth)
 
@@ -893,7 +898,7 @@ for _ in range(n_sims):
                             entropy_after = (-P_O_all_spots_after*np.log(P_O_all_spots_after)-(1-P_O_all_spots_after)*np.log(1-P_O_all_spots_after))/np.log(2)
                             entropy_after[observed_spots_e] = 0.0
 
-                            fract_IG = 10*(np.sum(entropy_before) - np.sum(entropy_after)) # /np.sum(entropy_before)
+                            fract_IG = 1*(np.sum(entropy_before) - np.sum(entropy_after)) # /np.sum(entropy_before)
                             costs_ex[g_e_i] -= fract_IG
 
                         best_path_ex = path_eval_ex[np.argmin(costs_ex)]
@@ -968,7 +973,7 @@ for _ in range(n_sims):
                         entropy_after = (-P_O_all_spots_after*np.log(P_O_all_spots_after)-(1-P_O_all_spots_after)*np.log(1-P_O_all_spots_after))/np.log(2)
                         entropy_after[observed_spots_e] = 0.0
 
-                        fract_IG = 10*(np.sum(entropy_before) - np.sum(entropy_after)) # /np.sum(entropy_before)
+                        fract_IG = 1*(np.sum(entropy_before) - np.sum(entropy_after)) # /np.sum(entropy_before)
                         costs_ex[g_e_i] -= fract_IG
 
                     best_path_ex = path_eval_ex[np.argmin(costs_ex)]
