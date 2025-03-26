@@ -15,7 +15,7 @@ from matplotlib.animation import FuncAnimation, FFMpegWriter
 from parksim.path_planner.hybrid_astar.hybrid_a_star import MOTION_RESOLUTION
 from parksim.path_planner.hybrid_astar.hybrid_a_star_parallel import map_lot, Car_class, evaluate_path, hybrid_a_star_planning, XY_GRID_RESOLUTION, YAW_GRID_RESOLUTION, MOTION_RESOLUTION, PED_RAD, MAX_WAIT_TIME
 from parksim.path_planner.hybrid_astar.car import plot_car, plot_other_car, plot_other_car_return, plot_car_return, VRX, VRY, plot_other_car_trans, plot_car_trans
-from parksim.path_planner.hybrid_astar.belief_pred_utils import occupancy_probability_multiple_spots_occ_dep
+from parksim.path_planner.hybrid_astar.belief_pred_utils import occupancy_probability_multiple_spots_occ_dep ,occupancy_probability_multiple_spots_occ_dep_p
 
 
 def plot_ell(p, Car_obj, ax):
@@ -178,22 +178,25 @@ def rect_dist_obs_p_spots_plot(p, center_spots, roads, roads_y, map_limits, Car_
                           [np.sin(p_yaw), np.cos(p_yaw)]])
     spot_t = np.dot(spot_t, rotationZ) # rotate the frame (wrt ego's heading)
 
+    epsilon = 1.0
     dist_inf_norm = np.max(
         np.array([1 / (long_scale / 2), 1 / (lat_scale / 2)]) * np.abs(spot_t), axis=1)  # scale the infinity norm by length and width
-    observed_spots = np.where(dist_inf_norm <= 1)[0]
+    observed_spots = np.where(dist_inf_norm <= epsilon)[0]
 
     # p is partially observed
-    p_ex = 2.0
+    gamma = 2.0
     # d_ex = (beta_l*p_ex - 1)* (Car_obj.length / 2) 
     # p_ex_x = p[0] + d_ex * np.cos(p[2])
     # p_ex_y = p[1] + d_ex * np.sin(p[2])
     # p_yaw = p[2]
 
     # spot_ex_t = center_spots - np.array([p_x, p_y]) 
-    dist_p_inf_norm = np.max(
-        np.array([1 / (long_scale / 2), 1 / (lat_scale / 2)]) * np.abs(spot_t), axis=1)  # scale the infinity norm by length and width
-    observed_p_all_spots = np.where(dist_p_inf_norm <= p_ex)[0]
+    observed_p_all_spots = np.where(dist_inf_norm <= gamma)[0]
     observed_p_spots = np.array(list(set(observed_p_all_spots) -  set(observed_spots)))
+
+    # alpha = 0.1
+    r_d = np.minimum((np.log(2)/(gamma - epsilon))*np.maximum((dist_inf_norm - epsilon), 0.0), np.log(2))  # linear r(d) function, can be softmax like
+    p_c = np.exp(-r_d) # probability of correct observation for partially observed spots   
 
     ## For exploration
     # only x is relevant in roads_ego
@@ -255,8 +258,8 @@ def rect_dist_obs_p_spots_plot(p, center_spots, roads, roads_y, map_limits, Car_
     car_p = np.array(
         [[-Car_obj.length/2, -Car_obj.length/2, Car_obj.length/2, Car_obj.length/2, -Car_obj.length/2],
          [Car_obj.width / 2, -Car_obj.width / 2, -Car_obj.width / 2, Car_obj.width / 2, Car_obj.width / 2]])
-    car_p[0, :] = (beta_l*p_ex) * car_p[0, :]
-    car_p[1, :] = (beta_w*p_ex) * car_p[1, :]
+    car_p[0, :] = (beta_l*gamma) * car_p[0, :]
+    car_p[1, :] = (beta_w*gamma) * car_p[1, :]
     car_p = np.dot(rotationZ, car_p) # car is 2xN
     car1_p = car_p + np.array([[p_x], [p_y]])  # (2xN) N are vertices
     ax.plot(car1_p[0, :], car1_p[1, :], color='orange', alpha=0.2)
@@ -265,7 +268,7 @@ def rect_dist_obs_p_spots_plot(p, center_spots, roads, roads_y, map_limits, Car_
 
     ax.plot(explore_points_final[:, 0], explore_points_final[:, 1], linestyle='', marker='o', color='green')    
 
-    return observed_spots, explore_points_final, observed_p_spots, dist_inf_norm
+    return observed_spots, explore_points_final, observed_p_spots, dist_inf_norm, p_c
 
 def rect_dist_obs_p_spots_e(p, center_spots, roads, roads_y, map_limits, Car_obj):
 
@@ -284,22 +287,24 @@ def rect_dist_obs_p_spots_e(p, center_spots, roads, roads_y, map_limits, Car_obj
                           [np.sin(p_yaw), np.cos(p_yaw)]])
     spot_t = np.dot(spot_t, rotationZ) # rotate the frame (wrt ego's heading)
 
+    epsilon = 1.0
     dist_inf_norm = np.max(
         np.array([1 / (long_scale / 2), 1 / (lat_scale / 2)]) * np.abs(spot_t), axis=1)  # scale the infinity norm by length and width
-    observed_spots = np.where(dist_inf_norm <= 1)[0]
+    observed_spots = np.where(dist_inf_norm <= epsilon)[0]
 
     # p is partially observed
-    p_ex = 2.0
+    gamma = 2.0
     # d_ex = (beta_l*p_ex - 1)* (Car_obj.length / 2) 
     # p_ex_x = p[0] + d_ex * np.cos(p[2])
     # p_ex_y = p[1] + d_ex * np.sin(p[2])
     # p_yaw = p[2]
 
     # spot_ex_t = center_spots - np.array([p_x, p_y]) 
-    dist_p_inf_norm = np.max(
-        np.array([1 / (long_scale / 2), 1 / (lat_scale / 2)]) * np.abs(spot_t), axis=1)  # scale the infinity norm by length and width
-    observed_p_all_spots = np.where(dist_p_inf_norm <= p_ex)[0]
+    observed_p_all_spots = np.where(dist_inf_norm <= gamma)[0]
     observed_p_spots = np.array(list(set(observed_p_all_spots) -  set(observed_spots)))
+
+    r_d = np.minimum((np.log(2)/(gamma - epsilon))*np.maximum((dist_inf_norm - epsilon), 0.0), np.log(2))  # linear r(d) function, can be softmax like
+    p_c = np.exp(-r_d) # probability of correct observation for partially observed spots   
 
     ## For exploration
     # only x is relevant in roads_ego
@@ -337,7 +342,8 @@ def rect_dist_obs_p_spots_e(p, center_spots, roads, roads_y, map_limits, Car_obj
     explore_points_final = np.array([explore_points[i] for i in range(explore_points.shape[0]) 
                                      if valid_point(explore_points[i], map_limits)])
 
-    return observed_spots, explore_points_final, observed_p_spots, dist_inf_norm
+    return observed_spots, explore_points_final, observed_p_spots, dist_inf_norm, p_c
+
 
 def update_spots_occupancy_arr_dep(P_O_spots, T):
     P_O_result = np.zeros((T + 1, len(P_O_spots)))
@@ -347,8 +353,63 @@ def update_spots_occupancy_arr_dep(P_O_spots, T):
     for k in range(1, T + 1):
         P_O_result[k] = p_a*(1-P_O_result[k-1]) + (1-p_d)*P_O_result[k-1]
 
+    P_O_result = np.maximum(P_O_result, 0.00001)
     return P_O_result
 
+def get_occ_vac_spots_stat(static_obs_kd_tree, center_spots, observed_spots, Car_obj, p_l, p_w):
+    """
+
+    Parameters:
+    - observed_spots: indices (M,)
+
+    Returns:
+    - occ_spots ,vac_spots: Indices
+    """
+
+    ## For static obstacles
+    epsilon_veh = 0.1
+    dist_nearest_obst = static_obs_kd_tree.query(center_spots[observed_spots], p = np.inf,
+                                                 distance_upper_bound=Car_obj.length / 2 + epsilon_veh)[0]  # 0 is distance to nearest neighbor of each spot, 1 is corresponding obstacle index
+    observed_spots_occ_ind = np.where(dist_nearest_obst <= Car_obj.width / 2 + epsilon_veh)[0]
+
+    occ_spots_ind = observed_spots_occ_ind
+
+    occ_spots = sorted(set(list(observed_spots[observed_spots_occ_ind]))) # occupied only by static obstacles
+    occ_spots_all = sorted(set(list(observed_spots[occ_spots_ind]))) # occupied by both static and dynamic agents
+    vac_spots = sorted(list(set(observed_spots) - set(occ_spots_all)))    
+
+    return occ_spots, vac_spots
+
+
+## for fully occupied observations
+def update_spots_occupancy_arr_dep_p_o(P_O_spots, p_c, T):
+    P_O_result = np.zeros((T + 1, len(P_O_spots)))
+    P_O_prior = np.zeros((T + 1, len(P_O_spots)))
+    P_O_result[0] = P_O_spots
+    p_a = 0.001 # probability of arrival
+    p_d = 0.0005 # probability of departure
+    for k in range(1, T + 1):
+        P_O_prior[k] = p_a*(1-P_O_result[k-1]) + (1-p_d)*P_O_result[k-1]
+        prior_k = p_c*P_O_prior[k] + (1-p_c)*(1-P_O_prior[k]) # for fully occupied spots
+        P_O_result[k] = p_c*P_O_prior[k]/prior_k
+
+    P_O_result = np.maximum(P_O_result, 0.0001)
+    return P_O_result
+
+## for fully vacant observations
+def update_spots_occupancy_arr_dep_p_v(P_O_spots, p_c, T):
+    P_O_result = np.zeros((T + 1, len(P_O_spots)))
+    P_O_prior = np.zeros((T + 1, len(P_O_spots)))
+    P_O_result[0] = P_O_spots
+    p_a = 0.001 # probability of arrival
+    p_d = 0.0005 # probability of departure
+    for k in range(1, T + 1):
+        P_O_prior[k] = p_a*(1-P_O_result[k-1]) + (1-p_d)*P_O_result[k-1]
+        prior_k = (1-p_c)*P_O_prior[k] + (p_c)*(1-P_O_prior[k]) # for fully occupied spots
+        P_O_result[k] = p_c*P_O_prior[k]/prior_k
+
+    P_O_result = np.maximum(P_O_result, 0.00001)
+    return P_O_result
 
 def get_occ_vac_spots(static_obs_kd_tree, dynamic_veh_state, ped_points, center_spots, observed_spots, Car_obj, p_l, p_w):
     """
@@ -532,6 +593,17 @@ def plot_anim(ax, fig, p_all, dynamic_veh_path, ped_path):
     car1_FOV = car_FOV + np.array([[p_x_f], [p_y_f]])  # (2xN) N are vertices
     car_FOV_plot, = ax.plot(car1_FOV[0, :], car1_FOV[1, :], color='blue', alpha=0.2)
 
+    # expanding rectangle for partially observed spots
+    gamma = 2.0 
+    car_p_o = np.array(
+        [[-Car_obj.length/2, -Car_obj.length/2, Car_obj.length/2, Car_obj.length/2, -Car_obj.length/2],
+         [Car_obj.width / 2, -Car_obj.width / 2, -Car_obj.width / 2, Car_obj.width / 2, Car_obj.width / 2]])
+    car_p_o[0, :] = gamma*beta_l*car_p_o[0, :]
+    car_p_o[1, :] = gamma*beta_w*car_p_o[1, :]
+    car_p = np.dot(rotationZ, car_p_o) # car is 2xN
+    car1_p = car_p + np.array([[p_x_f], [p_y_f]])  # (2xN) N are vertices
+    car_FOV_plot_p, = ax.plot(car1_p[0, :], car1_p[1, :], color='orange', alpha=0.2)
+
     time_text = 't=' + str(time_traj[0])
     props = dict(boxstyle='round', facecolor='w', alpha=0.5, edgecolor='black', linewidth=2)
     text_t  = ax.text(2.5,30.5, time_text, fontsize=22, bbox=props)
@@ -583,6 +655,10 @@ def plot_anim(ax, fig, p_all, dynamic_veh_path, ped_path):
         car1_FOV = car_FOV + np.array([[p_x_f], [p_y_f]])  # (2xN) N are vertices
         car_FOV_plot.set_data(car1_FOV[0, :], car1_FOV[1, :])
 
+        car_p = np.dot(rotationZ, car_p_o) # car is 2xN
+        car1_p = car_p + np.array([[p_x_f], [p_y_f]])  # (2xN) N are vertices
+        car_FOV_plot_p.set_data(car1_p[0, :], car1_p[1, :])
+
         # car = drawCar(Car_obj, x[frame], y[frame], yaw[frame])
         # car_plot_a.set_data(car[0, :], car[1, :])
         # arrow_plot_a.xy = [x[frame]+1*math.cos(yaw[frame]), y[frame]+1*math.sin(yaw[frame])]
@@ -593,7 +669,7 @@ def plot_anim(ax, fig, p_all, dynamic_veh_path, ped_path):
         #     dynamic_plot_a[i].center = (obst_x[frame][i], obst_y[frame][i],)
         # # dynamic_plot_a.set_data(obst_x[frame], obst_y[frame])
 
-        plot_list = dyn_cars + dyn_cars_arrow + [car_plot] + [arrow_plot] + [text_t] + ped + [car_FOV_plot]
+        plot_list = dyn_cars + dyn_cars_arrow + [car_plot] + [arrow_plot] + [text_t] + ped + [car_FOV_plot] + [car_FOV_plot_p]
         return plot_list
 
     # Create the animation
@@ -655,7 +731,7 @@ dynamic_veh_goal = np.array([np.hstack((center_spots[39] + np.array([-Car_obj.le
 #                              np.hstack((center_spots[35], np.deg2rad(0.0)))
 #                           ])
 
-dynamic_veh_parking = [1, 1] # 1 is parking/getting out using Hybrid A star, 0 is constant velocity/stationary
+dynamic_veh_parking = [0, 1] # 1 is parking/getting out using Hybrid A star, 0 is constant velocity/stationary
 T = 60 # total number of time steps to execute
 
 obstacleX_t = copy.deepcopy(obstacleX)
@@ -692,7 +768,7 @@ dynamic_veh_path=np.array(dynamic_veh_path)
 ped_0 = np.array([center_spots[28] + np.array([Car_obj.length/2-2, -Car_obj.width/2-1]),
                   center_spots[32] + np.array([-1, -1])]) # ped_in (0 velocity)
 # ped_0 = np.array([np.array([-Car_obj.length/2-2, -Car_obj.width/2-1])]) # no_ped
-ped_vel = np.array([[-0.3, -0.3],
+ped_vel = np.array([[-0.6, -0.6],
                     [0.0, 0.0]
                     ])
 # time steps
@@ -716,7 +792,7 @@ wb_2 = Car_obj.wheelBase / 2
 
 time_pred = []
 time_strat = []
-n_sims = 100
+n_sims = 1
 for _ in range(n_sims):
 
     t = 0
@@ -747,29 +823,52 @@ for _ in range(n_sims):
 
         # plot_ell(s, Car_obj, ax)
         
-        observed_spots, explore_points, observed_p_spots, dist_inf_norm = rect_dist_obs_p_spots_plot(p, center_spots, roads_x, roads_y, map_limits, Car_obj, ax)
+        observed_spots, explore_points, observed_p_spots, dist_inf_norm, p_c = rect_dist_obs_p_spots_plot(p, center_spots, roads_x, roads_y, map_limits, Car_obj, ax)
         # print("Observed Spots: ", observed_spots)
 
-        unobserved_spots = list(set(np.arange(n_spots).tolist()) - set(observed_spots.tolist()))
+        unobserved_spots = list(set(np.arange(n_spots).tolist()) - (set(observed_spots.tolist()) | set(observed_p_spots.tolist())))
 
-        P_O_unobserved_spots = update_spots_occupancy_arr_dep(P_O_all_spots[unobserved_spots], T) # T x n_unobserved_spots
+        P_O_unobserved_spots = update_spots_occupancy_arr_dep(P_O_all_spots[unobserved_spots], T_pred) # T x n_unobserved_spots
 
         P_O_all_spots[unobserved_spots] = P_O_unobserved_spots[-1]
 
         occ_spots, vac_spots, occ_spots_dyn, occ_spots_veh, occ_spots_ped = get_occ_vac_spots(static_obs_kd_tree, dynamic_veh_path_t[:, 0, :], ped_path_t[:, 0, :], center_spots, observed_spots, Car_obj, p_l, p_w)
+        occ_p_spots, vac_p_spots, occ_p_spots_dyn, occ_p_spots_veh, occ_p_spots_ped = get_occ_vac_spots(static_obs_kd_tree, dynamic_veh_path_t[:, 0, :], ped_path_t[:, 0, :], center_spots, observed_p_spots, Car_obj, p_l, p_w)
+        
         # print(f"Occupied spots: {occ_spots}, Vacant Spots: {vac_spots}")
         # print(f"Occupied by Vehicle: {occ_spots_veh}, Occupied by Pedestrian: {occ_spots_ped}")
-        
+        start_prob = time.time()
+
         if len(occ_spots) > 0:
             P_O_all_spots[occ_spots] = 1
-            P_O_occ_spots = update_spots_occupancy_arr_dep(P_O_all_spots[occ_spots], T)
+            P_O_occ_spots = update_spots_occupancy_arr_dep(P_O_all_spots[occ_spots], T_pred)
 
             P_O_all_spots[occ_spots] = P_O_occ_spots[-1]
-        
-        start_prob = time.time()
+
+        if len(occ_p_spots) > 0:
+            P_O_all_spots[occ_p_spots] = 1
+            P_O_occ_p_spots = update_spots_occupancy_arr_dep_p_o(P_O_all_spots[occ_p_spots], p_c[occ_p_spots], T_pred)
+
+            P_O_all_spots[occ_p_spots] = P_O_occ_p_spots[-1]             
+
         results = []
-        test_spots_ind = []        
-        if len(vac_spots) + len(occ_spots_dyn) > 0:
+        test_spots_ind = np.array([])    
+
+        if (len(vac_p_spots) + len(occ_p_spots_dyn) > 0) or (len(vac_spots) + len(occ_spots_dyn) > 0):
+            P_O_p_vacant, P_O_p_occ = occupancy_probability_multiple_spots_occ_dep_p(T_pred, dynamic_veh_path_t, ped_path_t, Sigma_0, Sigma_0_ped, Q, center_spots, vac_p_spots, occ_p_spots_veh, occ_p_spots_ped, p_c, Car_obj)
+
+            P_O_all_spots[vac_p_spots] = P_O_p_vacant[-1]
+            P_O_all_spots[occ_p_spots_dyn] = P_O_p_occ[-1]
+
+            ## Choose which spots to test for HA* paths
+            prob_thresh_vac = 0.3
+            vacant_spots_p_vacant_ind = np.where(P_O_p_vacant[-1] <= prob_thresh_vac)[0]
+            vacant_spots_p_vacant = np.array(vac_p_spots)[vacant_spots_p_vacant_ind]
+            prob_thresh_occ = 0.7
+            vacant_spots_p_occ_ind = np.where(P_O_p_occ[-1] <= prob_thresh_occ)[0]
+            vacant_spots_p_occ = np.array(occ_p_spots_dyn)[vacant_spots_p_occ_ind]
+
+            test_spots_ind = np.hstack((test_spots_ind, vacant_spots_p_vacant, vacant_spots_p_occ))
 
             P_O_vacant, P_O_occ = occupancy_probability_multiple_spots_occ_dep(T_pred, dynamic_veh_path_t, ped_path_t, Sigma_0, Sigma_0_ped, Q, center_spots, vac_spots, occ_spots_veh, occ_spots_ped, Car_obj)
 
@@ -786,7 +885,8 @@ for _ in range(n_sims):
             vacant_spots_occ_ind = np.where(P_O_occ[-1] <= prob_thresh_occ)[0]
             vacant_spots_occ = np.array(occ_spots_dyn)[vacant_spots_occ_ind]
 
-            test_spots_ind = np.hstack((vacant_spots_vacant, vacant_spots_occ))
+            test_spots_ind = np.hstack((test_spots_ind, vacant_spots_vacant, vacant_spots_occ))
+
             test_spots_center = center_spots[test_spots_ind.astype(int)]
 
             goal_park_spots = []  # park_spot i ->  goal yaw = 0.0 if 0, and np.pi if 1 -> (x, y, yaw) of goal
@@ -886,14 +986,21 @@ for _ in range(n_sims):
                         
                         for g_e_i in no_coll_path_ind:
                             g_e = path_eval_ex[g_e_i][-1]
-                            observed_spots_e, explore_points_e, observed_p_spots_e, dist_inf_norm_e = rect_dist_obs_p_spots_e(g_e, center_spots, roads_x, roads_y, map_limits, Car_obj)
+                            observed_spots_e, explore_points_e, observed_p_spots_e, dist_inf_norm_e, p_c_e = rect_dist_obs_p_spots_e(g_e, center_spots, roads_x, roads_y, map_limits, Car_obj)
                             # print("Observed Spots: ", observed_spots)
 
-                            unobserved_spots_e = list(set(np.arange(n_spots).tolist()) - set(observed_spots_e.tolist()))
+                            unobserved_spots_e = list(set(np.arange(n_spots).tolist()) - (set(observed_spots_e.tolist()) | set(observed_p_spots_e.tolist())))
 
                             P_O_unobserved_spots_after = update_spots_occupancy_arr_dep(P_O_all_spots_after[unobserved_spots_e], T) # T x n_unobserved_spots
-
                             P_O_all_spots_after[unobserved_spots_e] = P_O_unobserved_spots_after[-1]
+    
+                            occ_p_spots_e, vac_p_spots_e = get_occ_vac_spots_stat(static_obs_kd_tree, center_spots, observed_p_spots_e, Car_obj, p_l, p_w)
+
+                            P_O_p_observed_o_spots_after = update_spots_occupancy_arr_dep_p_o(P_O_all_spots_after[occ_p_spots_e], p_c_e[occ_p_spots_e], T)
+                            P_O_all_spots_after[occ_p_spots_e] = P_O_p_observed_o_spots_after[-1]
+
+                            P_O_p_observed_v_spots_after = update_spots_occupancy_arr_dep_p_v(P_O_all_spots_after[vac_p_spots_e], p_c_e[vac_p_spots_e], T)
+                            P_O_all_spots_after[vac_p_spots_e] = P_O_p_observed_v_spots_after[-1]
 
                             entropy_after = (-P_O_all_spots_after*np.log(P_O_all_spots_after)-(1-P_O_all_spots_after)*np.log(1-P_O_all_spots_after))/np.log(2)
                             entropy_after[observed_spots_e] = 0.0
@@ -961,15 +1068,22 @@ for _ in range(n_sims):
                     
                     for g_e_i in no_coll_path_ind:
                         g_e = path_eval_ex[g_e_i][-1]
-                        observed_spots_e, explore_points_e, observed_p_spots_e, dist_inf_norm_e = rect_dist_obs_p_spots_e(g_e, center_spots, roads_x, roads_y, map_limits, Car_obj)
+                        observed_spots_e, explore_points_e, observed_p_spots_e, dist_inf_norm_e, p_c_e = rect_dist_obs_p_spots_e(g_e, center_spots, roads_x, roads_y, map_limits, Car_obj)
                         # print("Observed Spots: ", observed_spots)
 
-                        unobserved_spots_e = list(set(np.arange(n_spots).tolist()) - set(observed_spots_e.tolist()))
+                        unobserved_spots_e = list(set(np.arange(n_spots).tolist()) - (set(observed_spots_e.tolist()) | set(observed_p_spots_e.tolist())))
 
                         P_O_unobserved_spots_after = update_spots_occupancy_arr_dep(P_O_all_spots_after[unobserved_spots_e], T) # T x n_unobserved_spots
-
                         P_O_all_spots_after[unobserved_spots_e] = P_O_unobserved_spots_after[-1]
 
+                        occ_p_spots_e, vac_p_spots_e = get_occ_vac_spots_stat(static_obs_kd_tree, center_spots, observed_p_spots_e, Car_obj, p_l, p_w)
+
+                        P_O_p_observed_o_spots_after = update_spots_occupancy_arr_dep_p_o(P_O_all_spots_after[occ_p_spots_e], p_c_e[occ_p_spots_e], T)
+                        P_O_all_spots_after[occ_p_spots_e] = P_O_p_observed_o_spots_after[-1]
+
+                        P_O_p_observed_v_spots_after = update_spots_occupancy_arr_dep_p_v(P_O_all_spots_after[vac_p_spots_e], p_c_e[vac_p_spots_e], T)
+                        P_O_all_spots_after[vac_p_spots_e] = P_O_p_observed_v_spots_after[-1]
+                    
                         entropy_after = (-P_O_all_spots_after*np.log(P_O_all_spots_after)-(1-P_O_all_spots_after)*np.log(1-P_O_all_spots_after))/np.log(2)
                         entropy_after[observed_spots_e] = 0.0
 

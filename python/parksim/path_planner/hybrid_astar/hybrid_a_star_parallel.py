@@ -56,7 +56,7 @@ COS_COST = 1.0 # cosine distance cost, aka, change in heading
 
 PED_RAD = 0.7
 DYNAMIC_SAFE_NET = 0.5
-DYNAMIC_SAFE_NET_PED = 1.5
+DYNAMIC_SAFE_NET_PED = 1.0
 MAX_WAIT_TIME = 4 # actual time (secs)
 INC_WAT_TIME = 1
 
