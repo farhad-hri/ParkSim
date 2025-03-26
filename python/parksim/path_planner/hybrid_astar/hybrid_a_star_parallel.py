@@ -507,7 +507,7 @@ def map_lot(type, config_map, Car_obj, axes):
     y_max = y_min + l_w + n_s1 * p_w + l_w
 
     ## big_lot: center of vehicle
-    s = [x_min + (x_max - x_min)/2 - p_l, y_max - l_w/4, np.deg2rad(-180.0)] # start_x is middle, start_y is close to y_max
+    s = [x_min + (x_max - x_min)/2 + 1.5*p_l, y_max - l_w/4, np.deg2rad(-180.0)] # start_x is middle, start_y is close to y_max
     # s = [x_min + 2*l_w + 4*p_l + 1*l_w/4, y_max - l_w - (n_s1 - 4)*p_w - p_w/2, np.deg2rad(-90.0)]
 
     center_spots = []
@@ -581,7 +581,7 @@ def map_lot(type, config_map, Car_obj, axes):
         prob_all_spots.append(p_vertical)
 
 
-    ## manually placing cars
+    ## manually placing a car
     # car = np.array(
     # [[-Car_obj.length/2, -Car_obj.length/2, Car_obj.length/2, Car_obj.length/2, -Car_obj.length/2],
     #     [Car_obj.width / 2, -Car_obj.width / 2, -Car_obj.width / 2, Car_obj.width / 2, Car_obj.width / 2]])
