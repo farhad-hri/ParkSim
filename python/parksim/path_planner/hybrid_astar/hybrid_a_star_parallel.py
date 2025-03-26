@@ -37,15 +37,15 @@ except Exception:
     raise
 
 XY_GRID_RESOLUTION = 5  # [m]
-YAW_GRID_RESOLUTION = np.deg2rad(20.0)  # [rad]
+YAW_GRID_RESOLUTION = np.deg2rad(5.0)  # [rad]
 MOTION_RESOLUTION = 0.5  # [m] path interpolate resolution
 N_STEER = 3  # number of steer command
 VR = 0.8  # robot radius
 
 # SB_COST = 100.0  # switch back penalty cost
-SB_COST = 10.0  # switch back penalty cost
+SB_COST = 0.0  # switch back penalty cost
 # BACK_COST = 5.0  # backward penalty cost
-BACK_COST = 1.0  # backward penalty cost
+BACK_COST = 0.0  # backward penalty cost
 # STEER_CHANGE_COST = 5.0  # steer angle change penalty cost
 STEER_CHANGE_COST = 0.5  # steer angle change penalty cost
 STEER_COST = 0.5  # steer angle change penalty cost
@@ -507,8 +507,8 @@ def map_lot(type, config_map, Car_obj, axes):
     y_max = y_min + l_w + n_s1 * p_w + l_w
 
     ## big_lot: center of vehicle
-    # s = [x_min + (x_max - x_min)/2 - 1.5*p_l, y_max - l_w/4, np.deg2rad(-180.0)] # start_x is middle, start_y is close to y_max
-    s = [x_min + 2*l_w + 4*p_l + 1*l_w/4, y_max - l_w - (n_s1 - 4)*p_w - p_w/2, np.deg2rad(-90.0)]
+    s = [x_min + (x_max - x_min)/2 - p_l, y_max - l_w/4, np.deg2rad(-180.0)] # start_x is middle, start_y is close to y_max
+    # s = [x_min + 2*l_w + 4*p_l + 1*l_w/4, y_max - l_w - (n_s1 - 4)*p_w - p_w/2, np.deg2rad(-90.0)]
 
     center_spots = []
     occ_spot_indices = []
@@ -580,9 +580,37 @@ def map_lot(type, config_map, Car_obj, axes):
         
         prob_all_spots.append(p_vertical)
 
-    # ## manually placing a car
-    # p_m = np.hstack((center_spots[29], np.deg2rad(0.0)))
-    # obstacleX, obstacleY, center_spots = map_lot_place_cars(p_m[0], p_m[1], p_m[2], indices, Car_obj, p_w, n_s1, obstacleX, obstacleY, center_spots, axes)
+
+    ## manually placing cars
+    # car = np.array(
+    # [[-Car_obj.length/2, -Car_obj.length/2, Car_obj.length/2, Car_obj.length/2, -Car_obj.length/2],
+    #     [Car_obj.width / 2, -Car_obj.width / 2, -Car_obj.width / 2, Car_obj.width / 2, Car_obj.width / 2]])
+
+    # row_split_i_all = [1, 2]
+    # j_all = [1, 3]
+    # for i in range(len(row_split_i_all)):
+    #     row_split_i = row_split_i_all[i] # row index
+    #     j = j_all[i] # spot index within the row
+    #     p_x = x_min + (1 + int(row_split_i / 2)) * l_w + row_split_i * p_l + p_l / 2
+    #     p_y = y_min + l_w + j*p_w / 2
+    #     p_yaw = yaw_r[row_split_i%2]
+    #     rotationZ = np.array([[math.cos(p_yaw), -math.sin(p_yaw)],
+    #                         [math.sin(p_yaw), math.cos(p_yaw)]])
+    #     car = np.dot(rotationZ, car)
+
+    #     center_spots.append(np.array([p_x, p_y]))
+
+    #     car1 = car + np.array([[p_x], [p_y]])  # (2xN) N are vertices
+    #     for ax in axes:
+    #         ax.plot(car1[0, :], car1[1, :], color='black', alpha=0.6)
+    #         ax.plot(p_x, p_y, marker='o', color='black', alpha=0.6)
+
+    #     ## Car
+    #     for i in range(car1.shape[1]-1):
+    #         line = np.linspace(car1[:, i], car1[:, i+1], num = 10, endpoint=False)
+    #         obstacleX = obstacleX + line[:, 0].tolist()
+    #         obstacleY = obstacleY + line[:, 1].tolist()
+
 
     ## Plot occupancy probabilities
     prob_all_spots_n = np.array(prob_all_spots)
@@ -604,7 +632,7 @@ def map_lot(type, config_map, Car_obj, axes):
     for i in np.linspace(y_min, y_max+1):
         obstacleX.append(x_min)
         obstacleY.append(i)
-    #
+    
     for i in np.linspace(x_min, x_max+1):
         obstacleX.append(i)
         obstacleY.append(y_max)

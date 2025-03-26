@@ -732,7 +732,7 @@ dynamic_veh_goal = np.array([np.hstack((center_spots[39] + np.array([-Car_obj.le
 #                           ])
 
 dynamic_veh_parking = [0, 1] # 1 is parking/getting out using Hybrid A star, 0 is constant velocity/stationary
-T = 60 # total number of time steps to execute
+T = 100 # total number of time steps to execute
 
 obstacleX_t = copy.deepcopy(obstacleX)
 obstacleY_t = copy.deepcopy(obstacleY)
@@ -766,9 +766,11 @@ dynamic_veh_path=np.array(dynamic_veh_path)
 # Pedestrian
 # ped_0 = np.array([center_spots[28] + np.array([Car_obj.length/2-1, -Car_obj.width/2-1])]) # ped_out
 ped_0 = np.array([center_spots[28] + np.array([Car_obj.length/2-2, -Car_obj.width/2-1]),
+                  center_spots[27] + np.array([Car_obj.length/2-2, -Car_obj.width/2-1]),
                   center_spots[32] + np.array([-1, -1])]) # ped_in (0 velocity)
 # ped_0 = np.array([np.array([-Car_obj.length/2-2, -Car_obj.width/2-1])]) # no_ped
-ped_vel = np.array([[-0.6, -0.6],
+ped_vel = np.array([[-0.0, -0.0],
+                    [-0.0, -0.0],
                     [0.0, 0.0]
                     ])
 # time steps
@@ -855,37 +857,39 @@ for _ in range(n_sims):
         test_spots_ind = np.array([])    
 
         if (len(vac_p_spots) + len(occ_p_spots_dyn) > 0) or (len(vac_spots) + len(occ_spots_dyn) > 0):
-            P_O_p_vacant, P_O_p_occ = occupancy_probability_multiple_spots_occ_dep_p(T_pred, dynamic_veh_path_t, ped_path_t, Sigma_0, Sigma_0_ped, Q, center_spots, vac_p_spots, occ_p_spots_veh, occ_p_spots_ped, p_c, Car_obj)
+            if (len(vac_p_spots) + len(occ_p_spots_dyn) > 0):
+                P_O_p_vacant, P_O_p_occ = occupancy_probability_multiple_spots_occ_dep_p(T_pred, dynamic_veh_path_t, ped_path_t, Sigma_0, Sigma_0_ped, Q, center_spots, vac_p_spots, occ_p_spots_veh, occ_p_spots_ped, p_c, Car_obj)
 
-            P_O_all_spots[vac_p_spots] = P_O_p_vacant[-1]
-            P_O_all_spots[occ_p_spots_dyn] = P_O_p_occ[-1]
+                P_O_all_spots[vac_p_spots] = P_O_p_vacant[-1]
+                P_O_all_spots[occ_p_spots_dyn] = P_O_p_occ[-1]
 
-            ## Choose which spots to test for HA* paths
-            prob_thresh_vac = 0.3
-            vacant_spots_p_vacant_ind = np.where(P_O_p_vacant[-1] <= prob_thresh_vac)[0]
-            vacant_spots_p_vacant = np.array(vac_p_spots)[vacant_spots_p_vacant_ind]
-            prob_thresh_occ = 0.7
-            vacant_spots_p_occ_ind = np.where(P_O_p_occ[-1] <= prob_thresh_occ)[0]
-            vacant_spots_p_occ = np.array(occ_p_spots_dyn)[vacant_spots_p_occ_ind]
+                ## Choose which spots to test for HA* paths
+                prob_thresh_vac = 0.3
+                vacant_spots_p_vacant_ind = np.where(P_O_p_vacant[-1] <= prob_thresh_vac)[0]
+                vacant_spots_p_vacant = np.array(vac_p_spots)[vacant_spots_p_vacant_ind]
+                prob_thresh_occ = 0.7
+                vacant_spots_p_occ_ind = np.where(P_O_p_occ[-1] <= prob_thresh_occ)[0]
+                vacant_spots_p_occ = np.array(occ_p_spots_dyn)[vacant_spots_p_occ_ind]
 
-            test_spots_ind = np.hstack((test_spots_ind, vacant_spots_p_vacant, vacant_spots_p_occ))
+                test_spots_ind = np.hstack((test_spots_ind, vacant_spots_p_vacant, vacant_spots_p_occ))
 
-            P_O_vacant, P_O_occ = occupancy_probability_multiple_spots_occ_dep(T_pred, dynamic_veh_path_t, ped_path_t, Sigma_0, Sigma_0_ped, Q, center_spots, vac_spots, occ_spots_veh, occ_spots_ped, Car_obj)
+            if (len(vac_spots) + len(occ_spots_dyn) > 0):
+                P_O_vacant, P_O_occ = occupancy_probability_multiple_spots_occ_dep(T_pred, dynamic_veh_path_t, ped_path_t, Sigma_0, Sigma_0_ped, Q, center_spots, vac_spots, occ_spots_veh, occ_spots_ped, Car_obj)
 
-            P_O_all_spots[vac_spots] = P_O_vacant[-1]
-            P_O_all_spots[occ_spots_dyn] = P_O_occ[-1]
+                P_O_all_spots[vac_spots] = P_O_vacant[-1]
+                P_O_all_spots[occ_spots_dyn] = P_O_occ[-1]
 
-            time_pred.append(time.time() - start_prob)
+                time_pred.append(time.time() - start_prob)
 
-            ## Choose which spots to test for HA* paths
-            prob_thresh_vac = 0.3
-            vacant_spots_vacant_ind = np.where(P_O_vacant[-1] <= prob_thresh_vac)[0]
-            vacant_spots_vacant = np.array(vac_spots)[vacant_spots_vacant_ind]
-            prob_thresh_occ = 0.7
-            vacant_spots_occ_ind = np.where(P_O_occ[-1] <= prob_thresh_occ)[0]
-            vacant_spots_occ = np.array(occ_spots_dyn)[vacant_spots_occ_ind]
+                ## Choose which spots to test for HA* paths
+                prob_thresh_vac = 0.3
+                vacant_spots_vacant_ind = np.where(P_O_vacant[-1] <= prob_thresh_vac)[0]
+                vacant_spots_vacant = np.array(vac_spots)[vacant_spots_vacant_ind]
+                prob_thresh_occ = 0.7
+                vacant_spots_occ_ind = np.where(P_O_occ[-1] <= prob_thresh_occ)[0]
+                vacant_spots_occ = np.array(occ_spots_dyn)[vacant_spots_occ_ind]
 
-            test_spots_ind = np.hstack((test_spots_ind, vacant_spots_vacant, vacant_spots_occ))
+                test_spots_ind = np.hstack((test_spots_ind, vacant_spots_vacant, vacant_spots_occ))
 
             test_spots_center = center_spots[test_spots_ind.astype(int)]
 
