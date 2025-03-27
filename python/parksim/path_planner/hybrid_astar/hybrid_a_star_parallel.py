@@ -39,16 +39,16 @@ except Exception:
 XY_GRID_RESOLUTION = 5  # [m]
 YAW_GRID_RESOLUTION = np.deg2rad(5.0)  # [rad]
 MOTION_RESOLUTION = 0.5  # [m] path interpolate resolution
-N_STEER = 3  # number of steer command
+N_STEER = 7  # number of steer command
 VR = 0.8  # robot radius
 
 # SB_COST = 100.0  # switch back penalty cost
-SB_COST = 0.0  # switch back penalty cost
+SB_COST = 10.0  # switch back penalty cost
 # BACK_COST = 5.0  # backward penalty cost
-BACK_COST = 0.0  # backward penalty cost
+BACK_COST = 1.0  # backward penalty cost
 # STEER_CHANGE_COST = 5.0  # steer angle change penalty cost
-STEER_CHANGE_COST = 0.5  # steer angle change penalty cost
-STEER_COST = 0.5  # steer angle change penalty cost
+STEER_CHANGE_COST = 10.0  # steer angle change penalty cost
+STEER_COST = 5.0  # steer angle change penalty cost
 H_COST = 1.0  # Heuristic cost
 
 ## only to evaluate path
@@ -507,7 +507,7 @@ def map_lot(type, config_map, Car_obj, axes):
     y_max = y_min + l_w + n_s1 * p_w + l_w
 
     ## big_lot: center of vehicle
-    s = [x_min + (x_max - x_min)/2 + 1.5*p_l, y_max - l_w/4, np.deg2rad(-180.0)] # start_x is middle, start_y is close to y_max
+    s = [x_min + (x_max - x_min)/2 - 1.5*p_l, y_max - l_w/4, np.deg2rad(-180.0)] # start_x is middle, start_y is close to y_max
     # s = [x_min + 2*l_w + 4*p_l + 1*l_w/4, y_max - l_w - (n_s1 - 4)*p_w - p_w/2, np.deg2rad(-90.0)]
 
     center_spots = []

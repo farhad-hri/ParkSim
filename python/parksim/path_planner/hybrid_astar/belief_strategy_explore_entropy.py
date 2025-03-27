@@ -655,7 +655,7 @@ dynamic_veh_goal = np.array([np.hstack((center_spots[39] + np.array([-Car_obj.le
 #                              np.hstack((center_spots[35], np.deg2rad(0.0)))
 #                           ])
 
-dynamic_veh_parking = [1, 1] # 1 is parking/getting out using Hybrid A star, 0 is constant velocity/stationary
+dynamic_veh_parking = [0, 1] # 1 is parking/getting out using Hybrid A star, 0 is constant velocity/stationary
 T = 60 # total number of time steps to execute
 
 obstacleX_t = copy.deepcopy(obstacleX)
@@ -716,7 +716,7 @@ wb_2 = Car_obj.wheelBase / 2
 
 time_pred = []
 time_strat = []
-n_sims = 100
+n_sims = 1
 for _ in range(n_sims):
 
     t = 0
